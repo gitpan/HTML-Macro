@@ -18,7 +18,7 @@ require AutoLoader;
 @EXPORT = qw(
 	
 );
-$VERSION = '1.25';
+$VERSION = '1.26';
 
 
 # Preloaded methods go here.
@@ -244,16 +244,16 @@ sub findfile
 {
     my ($self, $fname) = @_;
     my @incpath = @ {$self->{'@incpath'}};
-    unshift (@incpath, '') unless ($self->{'@no_local_incpath'});
+    push (@incpath, $self->{'@cwd'} . '/', "") unless ($self->{'@no_local_incpath'});
     while (@incpath)
     {
-        my $dir = shift @incpath;
+        my $dir = pop @incpath;
         my @stat = stat $dir . $fname;
         return ($dir . $fname, $stat[9]) if @stat;
     }
-    @incpath = @ {$self->{'@incpath'}};
-    $self->error ("Cannot find file $fname, incpath=" . join (',',@incpath)
-                  . "cwd=" . $self->{'@cwd'});
+    $self->error ("Cannot find file $fname, incpath=" . 
+                  join (',',@ {$self->{'@incpath'}})
+                  . ", cwd=" . $self->{'@cwd'});
     return ();
 }
 
@@ -292,7 +292,7 @@ sub openfile
     $dir = "$cwd/$dir" if ($dir !~ m|^([A-Za-z]:)?/|);
     $dir =~ s|//+|/|g;          # remove double slashes
 
-    push @ {$self->{'@incpath'}}, $dir;
+    push @ {$self->{'@incpath'}}, $dir . '/';
 
     # chdir to where file is
     # chdir $dir || $self->error ("openfile can't chdir $dir (opening $path): $!");
@@ -329,7 +329,8 @@ sub doinclude ($$)
             delete $self->{'@cwd'};
         }
         # we pushed the included file's directory into incpath when
-        # opening it (see openfile); now pop it
+        # opening it (see openfile); now pop it - we would usu. do this in
+        # process
         pop @ {$self->{'@incpath'}};
 
         return $buf;
@@ -595,7 +596,10 @@ sub process_buf ($$)
         elsif ($tag eq 'if')
         {
             push @tag_stack, ['if', $true, $nextpos] ;
-            $true = $self->eval_if_attrs ($attrs, $match, $tag, $nextpos, $package);
+            if ($active) {
+                $true = $self->eval_if_attrs 
+                    ($attrs, $match, $tag, $nextpos, $package);
+            }
         }
         elsif ($tag eq 'elsif/') {
             my $top = $tag_stack[$#tag_stack];
@@ -979,7 +983,8 @@ sub new ($$$ )
 {
     my ($class, $fname, $attr) = @_;
     my $self = { };
-    $self->{'@incpath'} = [];
+    $self->{'@incpath'} = [ ];
+    $self->{'@cwd'} = cwd;
 
     if ($attr) {
         if (ref $attr ne 'HASH') {

@@ -95,7 +95,7 @@ if ($result eq '<include/ file="/etc/passwd"><if expr="##YES##">greater</if><quo
 $ifp = HTML::Macro->new();
 $ifp->push_incpath ('include');
 $result = $ifp->process ('test6.html');
-if ($result eq 'included file stuff.htmlincluded file substuff.html')
+if ($result eq 'included file stuff.htmlincluded file substuff.html 6a')
 {
     print "ok 7\n";
 } else
@@ -182,7 +182,7 @@ eval {
 };
 
 if ($@ =~ qr{^HTML::Macro: error parsing 'if' attributes:  blah
-parsing test-error.txt on line 3, char 0
+parsing .*test-error.txt on line 3, char 0
 
 <if blah>; the error should be at char 0
 
@@ -190,6 +190,12 @@ called from test.pl, line }) {
     print "ok 14\n";
 } else {
     print "not ok 14: error handler produced $@\n";
+    print "should be: ", q{HTML::Macro: error parsing 'if' attributes:  blah
+parsing .*/test-error.txt on line 3, char 0
+
+<if blah>; the error should be at char 0
+
+called from test.pl, line };
 }
 
 $result = $ifp->process ('test-elsif.html');
