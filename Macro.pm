@@ -18,7 +18,7 @@ require AutoLoader;
 @EXPORT = qw(
 	
 );
-$VERSION = '1.22';
+$VERSION = '1.23';
 
 
 # Preloaded methods go here.
@@ -52,7 +52,7 @@ sub collapse_whitespace
     while ($buf =~ m{(< \s*
                       (/?textarea|/?pre|/?quote)(_?)
                       (?: (?: \s+\w+ \s* = \s* "[^\"]*") |    # quoted attrs
-                          (?: \s+\w+ \s* =[^>\"]) | # attrs w/ no quotes
+                          (?: \s+\w+ \s* =[^>\"]*) | # attrs w/ no quotes
                           (?: \s+\w+) # attrs with no value
                        ) *
                       >)}sgix)
@@ -155,6 +155,17 @@ sub doeval ($$)
     return $result;
 }
 
+sub case_fold_match
+{
+    my ($hash, $key) = @_;
+    my $val =
+        exists($$hash{$key}) ? (defined($$hash{$key}) ?  $$hash{$key} : '')
+            : ( exists ($$hash{lc $key}) ? (defined($$hash{lc $key}) ? $$hash{lc $key} : '')
+                : (exists $$hash{uc $key} ? (defined($$hash{uc $key}) ? $$hash{uc $key} : '')
+                   : undef) );
+    return $val;
+}
+
 sub match_token ($$)
 {
     my ($self, $var) = @_;
@@ -164,27 +175,18 @@ sub match_token ($$)
     }
     # these are the two styles we've used
     my $val;
-    while (1) 
+    while ($self) 
     {
-        $val = exists($$self{$var}) ? (defined($$self{$var}) ?  $$self{$var} : '')
-                : ( exists ($$self{lc $var}) ? (defined($$self{lc $var}) ? $$self{lc $var} : '')
-                    : (exists $$self{uc $var} ? (defined($$self{uc $var}) ? $$self{uc $var} : '')
-                       : undef) );
-        last if (defined ($val));
+        # ovalues is also used to store request variables so they override
+        # data fetched (later in the processing of a request) from the database
+        $val = &case_fold_match ($self->{'@ovalues'}, $var) if $self->{'@ovalues'};
+        $val = &case_fold_match ($self, $var) if ! defined ($val);
+        return $val if (defined ($val));
 
         # include outer loops in scope
-        my $parent = $self->{'@parent'} || '';
-        last if !$parent;
-        # parent may be either an HTML::Macro or an HTML::Macro::Loop
-        if ($parent->isa('HTML::Macro::Loop'))
-        {
-            $self = $parent->{'@parent'};
-            die if ! $self;
-        } else {
-            $self = $parent;
-        }
+        $self = $self->parent();
     }
-    return defined($val) ? $val : undef;
+    return undef;
 }
 
 sub dosub ($$)
@@ -782,14 +784,48 @@ sub set ($$)
     warn "odd number of arguments to set" if @_;
 }
 
-sub set_global ($$)
+sub parent ($$)
+{
+    my $self = shift;
+    $self = $self->{'@parent'};
+    return undef if !$self;
+    # parent may be either an HTML::Macro or an HTML::Macro::Loop
+    if ($self->isa('HTML::Macro::Loop'))
+    {
+        $self = $self->{'@parent'};
+        if ( ! $self ) {
+            warn "found an orphaned HTML::Macro::Loop" ;
+            return undef;
+        }
+    }
+    return $self;
+}
+
+sub top ($$)
 {
     my $self = shift;
     my $parent;
     while (my $parent = $self->{'@parent'}) {
         $self = $parent;
     }
-    $self->set (@_);
+    return $self;
+}
+
+sub set_global ($$)
+{
+    my $self = shift;
+    $self->top()->set (@_);
+}
+
+sub set_ovalue ($$)
+{
+    my $self = shift;
+    while ($#_ > 0) {
+        $self->{'@ovalues'} {$_[0]} = $_[1];
+        shift;
+        shift;
+    }
+    warn "odd number of arguments to set" if @_;
 }
 
 sub push_incpath ($ )
@@ -1249,10 +1285,3 @@ Michael Sokolov, sokolov@ifactory.com
 perl(1).
 
 =cut
-
-
-
-
-
-
-

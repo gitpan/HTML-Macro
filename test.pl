@@ -139,3 +139,26 @@ if ($result eq "Hello, world!\nHello, World!")
 {
     print "not ok 10: $result should be: Hello, world!\nHello, World!";
 }
+
+$ifp->set_global ('val', -1);
+$ifp->set ('yes', 1);
+$result = $ifp->process ('test-global.html');
+if ($result eq "greater\nlessequal\n")
+{
+    print "ok 11\n";
+} else
+{
+    print "val=", $ifp->get ('val');
+    print "not ok 11: $result\n";
+}
+
+$ifp->set_ovalue ('yes', 0);
+$result = $ifp->process ('test3.html');
+if ($result eq "")
+{
+    print "ok 12\n";
+} else
+{
+    print "not ok 12: $result\n";
+    print "ovalues=", keys %{$ifp->{'@ovalues'}}, "\n";
+}
