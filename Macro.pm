@@ -18,7 +18,7 @@ require AutoLoader;
 @EXPORT = qw(
 	
 );
-$VERSION = '1.23';
+$VERSION = '1.25';
 
 
 # Preloaded methods go here.
@@ -135,24 +135,37 @@ sub doloop ($$)
 
 sub doeval ($$)
 {
-    my ($self, $expr, $body) = @_;
+    my ($self, $attr, $attrval, $body) = @_;
     if ($self->{'@attr'}->{'debug'}) {
-        print STDERR "HTML::Macro: processing eval: { $expr }\n";
+        print STDERR "HTML::Macro: processing eval: { $attr $attrval }\n";
     }
-    my $nested = new HTML::Macro;
-    $nested->{'@parent'} = $self;
-    $nested->{'@body'} = $body;
-    my @incpath = @ {$self->{'@incpath'}};
-    $nested->{'@incpath'} = \@incpath; # make a copy of incpath
-    $nested->{'@attr'} = $self->{'@attr'};
-    $nested->{'@cwd'} = $self->{'@cwd'};
-
+    my $htm;
+    if ($body) {
+        $htm = new HTML::Macro;
+        $htm->{'@parent'} = $self;
+        $htm->{'@body'} = $body;
+        my @incpath = @ {$self->{'@incpath'}};
+        $htm->{'@incpath'} = \@incpath; # make a copy of incpath
+        $htm->{'@attr'} = $self->{'@attr'};
+        $htm->{'@cwd'} = $self->{'@cwd'};
+    } else {
+        $htm = $self;
+    }
     my $package = $self->{'@caller_package'};
-    my $result = eval " & {package $package; sub { $expr } } (\$nested)";
-    if ($@) {
-        $self->error ("error evaluating '$expr': $@");
+    my $result;
+    if ($attr eq 'expr') {
+        $result = eval " & {package $package; sub { $attrval } } (\$htm)";
+    } else {
+        $package = $::{$package . '::'};
+        my $func = $$package{$attrval};
+        eval {
+            $result = & {$func} ($htm);
+        };
     }
-    return $result;
+    if ($@) {
+        $self->error ("error evaluating $attr '$attrval': $@");
+    }
+    return $result || '';       # inhibit undefined warnings
 }
 
 sub case_fold_match
@@ -240,7 +253,7 @@ sub findfile
     }
     @incpath = @ {$self->{'@incpath'}};
     $self->error ("Cannot find file $fname, incpath=" . join (',',@incpath)
-                  . "cwd=" . cwd);
+                  . "cwd=" . $self->{'@cwd'});
     return ();
 }
 
@@ -251,18 +264,18 @@ sub openfile
     my ($self, $path) = @_;
     my @incpath = @ {$self->{'@incpath'}};
 
-    open (FILE, $path) || 
-        $self->error ("Cannot open '$path': $!");
+    my $cwd = $self->{'@cwd'};
+
+    open (FILE, $path) || $self->error ("Cannot open '$path': $!");
 
     if ($self->{'@attr'}->{'debug'}) {
-        print STDERR "HTML::Macro: opening $path, incpath=@incpath, cwd=", cwd, "\n";
+        print STDERR "HTML::Macro: opening $path, incpath=@incpath, cwd=$cwd";
     }
     $self->{'@file'} = $path;
 
-    # change directories so relative includes work
+    # we will change directories so relative includes work
     # remember where we are so we can get back here
 
-    my $cwd = $self->{'@cwd'} || cwd; # cwd is expensive
     push @ {$self->{'@cdpath'}}, $cwd;
 
     my ($dir, $fname);
@@ -282,7 +295,7 @@ sub openfile
     push @ {$self->{'@incpath'}}, $dir;
 
     # chdir to where file is
-    chdir $dir || $self->error ("openfile can't chdir $dir (opening $path): $!");
+    # chdir $dir || $self->error ("openfile can't chdir $dir (opening $path): $!");
 
     #print STDERR "openfile: \@cwd=", $dir, "\n";
     $self->{'@cwd'} = $dir;
@@ -309,12 +322,14 @@ sub doinclude ($$)
         my $lastdir = pop @ {$self->{'@cdpath'}};
         if ($lastdir)
         {
-            chdir $lastdir ;
+            # chdir $lastdir ;
             $self->{'@cwd'} = $lastdir;
         }
         else {
             delete $self->{'@cwd'};
         }
+        # we pushed the included file's directory into incpath when
+        # opening it (see openfile); now pop it
         pop @ {$self->{'@incpath'}};
 
         return $buf;
@@ -335,6 +350,35 @@ sub attr_backwards_compat
     }
 }
 
+sub eval_if_attrs
+{
+    my ($self, $attrs, $match, $tag, $nextpos, $package) = @_;
+    my $true;
+    if ($attrs =~ /^\s* expr \s* = \s* "([^\"]*)" \s*$/six)
+    { 
+        my $expr = $1 || '';
+        $expr = $self->dosub ($expr);
+        $true = eval "{ package $package; $expr }";
+        if ($@) {
+            $self->error ("error evaluating $match (after substitutions: $expr): $@",
+                          $nextpos);
+        }
+    } 
+    elsif ($attrs =~ /^\s* (n?)def \s* = \s* "([^\"]*)" \s*$/six)
+    {
+        my $ndef = $1;
+        my $token = $2 || '';
+        $true = $self->match_token ($token);
+        $true = ! $true if $ndef;
+    }
+    else
+    {
+        $self->error ("error parsing '$tag' attributes: $attrs",
+                      $nextpos);
+    }
+    return $true;
+}
+
 sub process_buf ($$)
 {
     my ($self, $buf) = @_;
@@ -344,9 +388,9 @@ sub process_buf ($$)
     my $pos = 0;
     my $quoting = 0;
     my $looping = 0;
-    my $false = 0;
+    my $true = 1;
     my $emitting = 1;
-    my $vanilla = 1;
+    my $active = 1;
 
     &attr_backwards_compat;
 
@@ -357,7 +401,7 @@ sub process_buf ($$)
     my $package = $self->{'@caller_package'};
 
     while ($buf =~ m{(< \s*
-                      (/?loop|/?if|include|/?else|/?quote|/?eval|define)$underscore(/?)
+                      (/?loop|/?if|include|/?else|/?quote|/?eval|elsif|define)$underscore(/?)
                       (   (?: \s+\w+ \s* = \s* "[^\"]*") |    # quoted attrs
                           (?: \s+\w+ \s* =[^>\"]) | # attrs w/ no quotes
                           (?: \s+\w+) # attrs with no value
@@ -367,15 +411,15 @@ sub process_buf ($$)
         my ($match, $tag, $slash, $attrs, $slash2) = ($1, lc $2, $3, $4, $5);
         my $nextpos = (pos $buf) - (length ($&));
         $slash = $slash2 if ! $slash; # allow normal XML style
-        if (! $slash && ($tag eq 'include' || $tag eq 'define'))
+        if (! $slash && ($tag eq 'include' || $tag eq 'define' || $tag eq 'elsif'))
         {
             $slash = 1;
-            $self->warning ("missing trailing slash for $tag", $nextpos);
+            $self->warning ("missing trailing slash for singleton tag $tag", $nextpos);
         }
         $tag .= '/' if $slash;
-        $emitting = ! ($false || $looping);
-        $vanilla = !($quoting || $false || $looping);
-        if ($vanilla)
+        $emitting = $true && ! $looping;
+        $active = $true && !$quoting && !$looping;
+        if ($active)
         {
             $out .= $self->dosub 
                 (substr ($buf, $pos, $nextpos - $pos));
@@ -423,22 +467,28 @@ sub process_buf ($$)
             # quote a loop tag!
             # Rather, leave that for a recursion.
         {
-            # die if ! $false;    # debugging test
+            # die if $true;    # debugging test
             # if we're in a false conditional, don't emit anything and skip over
             # the matched tag
             $pos = $nextpos + length($match);
         }
         if ($tag eq 'loop' || $tag eq 'eval')
-            # loop and eval are similar in their syntactic force - both are block-level
+            # loop and eval are similar in their lexical force - both are block-level
             # tags that force embedded scopes.  Therefore their contents are processed
             # in a nested evaluation, and not here.
+            # The effect on eval is that an eval nested in a loop
         {
-            (($tag eq 'loop') &&
-             $match =~ /id="([^\"]*)"/ || $match =~ /id=(\S+)/) ||
-                 # (tag eq 'eval') &&
-                 $match =~ /expr="([^\"]*)"/ ||
-                     $self->error ("$tag tag has no id '$match'", $nextpos);
-            push @tag_stack, [$tag, $1, $nextpos];
+            my ($attr, $attrval);
+            if ($tag eq 'loop') {
+                $match =~ /id="([^\"]*)"/ || $match =~ /id=(\S+)/ ||
+                    $self->error ("loop tag '$match' has no id", $nextpos);
+                $attr = $1;
+            } else {
+                $match =~ /(expr|func)="([^\"]*)"/ || 
+                    $self->error ("eval tag '$match' has no expr or func", $nextpos);
+                ($attr, $attrval) = ($1, $2);
+            }
+            push @tag_stack, [$tag, $attr, $nextpos, $attrval];
             ++$looping;
             next;
         }
@@ -447,13 +497,13 @@ sub process_buf ($$)
             my $matching_tag = pop @tag_stack;
             $self->error ("no match for tag '$tag'", $nextpos)
                 if ! $matching_tag;
-            my ($start_tag, $attr, $tag_pos) = @$matching_tag;
+            my ($start_tag, $attr, $tag_pos, $attrval) = @$matching_tag;
             $self->error ("start tag '$start_tag' (at char $tag_pos) ends with end tag '$tag'",
                           $nextpos)
                 if ($start_tag ne substr ($tag, 1));
 
             -- $looping;
-            if (!$looping && !$quoting && !$false)
+            if ($true && !$looping && !$quoting)
             {
                 $attr = $self->dosub ($attr);
                 if ($tag eq '/loop') {
@@ -462,7 +512,7 @@ sub process_buf ($$)
                 } else {
                     # tag=eval
                     $out .= $self->doeval
-                        ($attr, substr ($buf, $pos, $nextpos-$pos));
+                        ($attr, $attrval, substr ($buf, $pos, $nextpos-$pos));
                 }
                 $pos = $nextpos + length($match);
             }
@@ -527,76 +577,83 @@ sub process_buf ($$)
             $self->error ("no match for tag '$tag'", $nextpos)
                 if ! $matching_tag;
             my ($start_tag, $attr, $tag_pos) = @$matching_tag;
+            if ($tag eq '/if' && $start_tag eq 'elsif') {
+                $matching_tag = pop @tag_stack;
+                $self->error ("no match for tag '/if'", $nextpos)
+                    if ! $matching_tag;
+                ($start_tag, $attr, $tag_pos) = @$matching_tag;
+            }
             $self->error ("start tag '$start_tag' ends with end tag '$tag'",
                           $nextpos)
                 if ($start_tag ne substr ($tag, 1));
 
             if ($start_tag eq 'if')
             {
-                $false = $attr;
+                $true = $attr;
             }
-            next;
         }
-        if ($tag eq 'if')
+        elsif ($tag eq 'if')
         {
-            push @tag_stack, ['if', $false, $nextpos] ;
-            if ($vanilla) 
-            {
-                if ($attrs =~ /^\s* expr \s* = \s* "([^\"]*)" \s*$/six)
-                { 
-                    my $expr = $1 || '';
-                    $expr = $self->dosub ($expr);
-                    $false = !eval "{ package $package; $expr }";
-                    if ($@) {
-                        $self->error ("error evaluating $match (after substitutions: $expr): $@",
-                                      $nextpos);
-                    }
-                } 
-                elsif ($attrs =~ /^\s* def \s* = \s* "([^\"]*)" \s*$/six)
-                {
-                    my $token = $1 || '';
-                    $false = ! $self->match_token ($token);
-                }
-                else
-                {
-                    $self->error ("error parsing 'if' attributes: $attrs)",
-                                  $nextpos);
-                }
-            }
-            next;
+            push @tag_stack, ['if', $true, $nextpos] ;
+            $true = $self->eval_if_attrs ($attrs, $match, $tag, $nextpos, $package);
         }
-        elsif ($tag eq 'else/')
+        elsif ($tag eq 'elsif/') {
+            my $top = $tag_stack[$#tag_stack];
+            my $last_tag = $$top[0];
+            if ($last_tag eq 'if') {
+                $top = ['elsif', $$top[1], $true];
+                push @tag_stack, $top;
+            } elsif ($last_tag eq 'elsif') {
+                # if *any* of the foregoing if/elsif clauses have been true
+                $$top[2] ||= $true;
+            } else {
+                $self->error ("<elsif /> not in <if>", $nextpos);
+            }
+            if (!$looping && $$top[1] && $$top[2]) {
+                # if an earlier if/elsif was true, and we are not overshadowed
+                # by an enclosing scope, this one is false.
+                $true = 0;
+            }
+            elsif (!$looping && $$top[1] && ! $$top[2]) {
+                # if all previous if/elsifs were false, this one might still be true
+                $true = $self->eval_if_attrs ($attrs, $match, $tag, $nextpos, $package);
+            }
+        }
+        elsif ($tag eq 'else/' || $tag eq 'else')
         {
             my $top = $tag_stack[$#tag_stack];
-            $self->error ("<else/> not in <if>", $nextpos) 
-                if ($$top[0] ne 'if');
+            my $last_tag = $$top[0];
+
             # if we are embedded in a false condition, it overrides us: 
             # don't change false based on this else.  Also, don't evaluate
             # anything while looping: postpone for recursion.
-            if (!$looping && ! $$top[1])
-            {
-                $false = ! $false ;
+
+            if ($last_tag eq 'elsif') {
+                
+                my $if_elsif_any_true = $$top[2] || $true;
+                pop @tag_stack;
+                my $top = $tag_stack[$#tag_stack];
+                # check falsitude of enclosing scope
+                $true = (! $looping && ! $if_elsif_any_true) if $$top[1];
+            } elsif ($last_tag eq 'if') {
+                $true = ! $true if (! $looping && $$top[1]);
+            } else {
+                $self->error ("<else /> not in <if>", $nextpos);
             }
-            next;
-        }
-        elsif ($tag eq 'else')
-        {
-            my $top = $tag_stack[$#tag_stack];
-            $self->error ("<else> not in <if>", $nextpos) if $$top[0] ne 'if';
-            $false = ! $false if (!$looping && ! $$top[1]);
-            push @tag_stack, ['else', $false];
-            next;
+
+            push @tag_stack, ['else', $true] if $tag eq 'else';
         }
         elsif ($tag eq 'include/')
         {
-            my $file = $self->{'@file'};
-            $out .= $self->doinclude ($match) if ($vanilla);
-            $self->{'@file'} = $file;
-            next;
+            if ($active) {
+                my $file = $self->{'@file'};
+                $out .= $self->doinclude ($match);
+                $self->{'@file'} = $file;
+            }
         }
         elsif ($tag eq 'define/')
         {
-            if (!$looping && !$quoting && !$false)
+            if ($active)
             {
                 $match =~ /name="([^\"]*)"/ || 
                     $self->error ("no name attr for define tag in '$match'",
@@ -609,10 +666,18 @@ sub process_buf ($$)
                 $self->set ($name, $self->dosub($val));
             }
         }
-
+        elsif ($tag eq 'eval/') {
+            if ($match =~ /expr="([^\"]*)"/) {
+                my $expr = $self->dosub ($1);
+                $self->doeval ('expr', $expr);
+            } elsif ($match =~ /func="(\w+)"/) {
+                $self->doeval ('func', $1);
+            } else {
+                $self->error ("eval tag must have valid expr or func attribute", $nextpos);
+            }
+        }
     }
     # process trailer
-    #if ($quoting || $looping || $false)
     while (@tag_stack)
     {
         my $tag = pop @tag_stack;
@@ -668,7 +733,7 @@ sub readfile
         # Isn't this also the absolute path of the file's directory?
         $$self{'@cwd'} = $file_cache{$key . '@cwd'};
 
-        chdir $$self{'@cwd'};
+        # chdir $$self{'@cwd'};
 
         # return the contents of the file
         return $file_cache{$key};
@@ -731,7 +796,7 @@ sub process ($$)
     if ($lastdir)
     {
         #print STDERR "popping up to $lastdir\n";
-        chdir $lastdir ;
+        # chdir $lastdir ;
         $self->{'@cwd'} = $lastdir;
     }
     else {
@@ -757,9 +822,21 @@ sub error
 {
     my ($self, $msg, $pos) = @_;
     $self->get_caller_info if ! $self->{'@caller_package'};
-    $msg = "HTML::Macro: $msg";
-    $msg .= " parsing " . $self->{'@file'} if ($self->{'@file'});
-    $msg .= " near char $pos" if $pos;
+    $msg = "HTML::Macro: $msg\n";
+    $msg .= "parsing " . $self->{'@file'} if ($self->{'@file'});
+    #$msg .= " near char $pos" if $pos;
+    if ($pos) {
+        my $line = 1;
+        my $linepos = 0;
+        my $body = $$self{'@body'};
+        while ($body =~ /\n/sg && pos $body <= $pos) {
+            ++$line;
+            $linepos = pos $body;
+        }
+        my $charpos = ($pos - $linepos);
+        $msg .= " on line $line, char $charpos\n\n";
+        $msg .= substr($body, $linepos, ((pos $body) - $linepos));
+    }
     die "$msg\ncalled from " . $self->{'@caller_file'} . ", line " . $self->{'@caller_line'} . "\n";
 }
 
@@ -769,7 +846,18 @@ sub warning
     $self->get_caller_info if ! $self->{'@caller_package'};
     $msg = "HTML::Macro: $msg";
     $msg .= " parsing " . $self->{'@file'} if ($self->{'@file'});
-    $msg .= " near char $pos" if $pos;
+    if ($pos) {
+        my $line = 1;
+        my $linepos = 0;
+        my $body = $$self{'@body'};
+        while ($body =~ /\n/sg && pos $body <= $pos) {
+            ++$line;
+            $linepos = pos $body;
+        }
+        my $charpos = ($pos - $linepos);
+        $msg .= " on line $line, char $charpos\n\n";
+        $msg .= substr($body, $linepos, ((pos $body) - $linepos));
+    }
     warn "$msg\ncalled from " . $self->{'@caller_file'} . ", line " . $self->{'@caller_line'} . "\n";
 }
 
@@ -831,6 +919,7 @@ sub set_ovalue ($$)
 sub push_incpath ($ )
 {
     my ($self) = shift;
+    $self->{'@cwd'} = cwd if ! $self->{'@cwd'};
     while (my $dir = shift)
     {
         $dir .= '/' if $dir !~ m|/$|;
@@ -838,7 +927,7 @@ sub push_incpath ($ )
         {
             # turn into an absolute path if not already
             # allow DOS drive letters at the start
-            $dir = ($self->{'@cwd'} || cwd) . '/' . $dir;
+            $dir = $self->{'@cwd'} . '/' . $dir;
         }
         push @ {$self->{'@incpath'}}, $dir;
     }
@@ -925,7 +1014,8 @@ sub keys ()
 {
     my ($self) = @_;
     my @keys = grep /^[^@]/, keys %$self;
-    push @keys, $self->{'@parent'}->keys() if $self->{'@parent'};
+    push @keys, keys % {$self->{'@ovalues'}} if $self->{'@ovalues'};
+    push @keys, $self->parent()->keys() if $self->parent();
     return @keys;
 }
 
@@ -981,28 +1071,37 @@ including humans) to parse your files: it's yucky to have a lot of HTML in
 a string in your perl file, and it's yucky to have perl embedded in a
 special tag in an HTML file.
 
-That said, HTML::Macro does provide for some simple programming constructs to
-appear embedded in HTML code.  Think of it as a programming language on a
-similar level as the C preprocessor.  HTML::Macro "code" is made to look like
-HTML tags so it will be fairly innocuous for most HTML-oriented editors to
-deal with.  At the moment HTML::Macro suports variables, conditionals, loops,
-file interpolation and quoting (to inhibit all of the above).  HTML::Macro
-variables are always surrounded with single or double hash marks: "#" or
-"##".  Variables surrounded by double hash marks are subject to html entity
-encoding; variables with single hash marks are substituted "as is" (like
-single quotes in perl or UNIX shells).  Conditionals are denoted by the
-<if> and <else> tags, and loops by the <loop> tag.
+HTML::Macro began with some simple programming constructs: macro
+expansions, include files, conditionals, loops and block quotes.  Since
+then we've added very little: only a define tag to allow setting values and
+an eval tag to allow perl function calls in a nested macro scope.  Our
+creed is "less is more, more or less."
 
-Usage:
+HTML::Macro variables will look familiar to C preprocessor users or
+especially to Cold Fusion people.  They are always surrounded with single
+or double hash marks: "#" or "##".  Variables surrounded by double hash
+marks are subject to html entity encoding; variables with single hash marks
+are substituted "as is" (like single quotes in perl or UNIX shells).
+Conditionals are denoted by the <if> and <else> tags, and loops by the
+<loop> tag.  Quoting used to be done using a <quote> tag, but we now
+deprecate that in favor of the more familiar CFML quoting syntax: <!---
+--->.
+
+=head1 Basic Usage:
 
 Create a new HTML::Macro:
 
-    $htm = new HTML::Macro  ('templates/page_template.html');
+    $htm = new HTML::Macro  ('templates/page_template.html', { 'collapse_whitespace' => 1 });
 
-The filename argument is optional.  If you do not specify it now, you can
-do it later, which might be useful if you want to use this HTML::Macro to
-operate on more than one template.  If you do specify the template when the
-object is created, the file is read in to memory at that time.
+The first (filename) argument is optional.  If you do not specify it now,
+you can do it later, which might be useful if you want to use this
+HTML::Macro to operate on more than one template.  If you do specify the
+template when the object is created, the file is read in to memory at that
+time.
+
+The second (attribute hash) argument is also optional, but you have to set
+it now if you want to set attributes.  See Attributes below for a list of
+attributes you can set.
 
 Optionally, declare the names of all the variables that will be substituted
 on this page.  This has the effect of defining the value '' for all these
@@ -1012,12 +1111,23 @@ variables.
 
 Set the values of one or more variables using HTML::Macro::set.
 
-  $htm->set ('var', 'value');
+  $htm->set ('var', 'value', 'var2', 'value2');
+
+Note: variable names beginning with an '@' are reserved for internal use.  
+
+Get previously-set values using get:
+
+  $htm->get ('var');  # returns 'value'
+  $htm->get ('blah');  # returns undefined
+
+get also returns values from enclosing scopes (see Scope below).
+
+  $htm->keys() returns a list of all defined macro names.
 
 Or use HTML::Macro::set_hash to set a whole bunch of values at once.  Typically
 used with the value returned from a DBI::fetchrow_hashref.
 
-  $htm->set_hash ( {'var' => 'value' } );
+  $htm->set_hash ( {'var' => 'value', 'var2' => 'value2' } );
 
 Finally, process the template and print the result using HTML::Macro::print,
 or save the value return by HTML::Macro::process.  
@@ -1027,28 +1137,48 @@ or save the value return by HTML::Macro::process.
     # or: print CACHED_PAGE, $htm->process ('templates/page_template.html');
     close CACHED_PAGE;
  
-    - or - 
+    - or in some contexts simply: 
 
-    $htm->print;
-
-    - or -
-
+    $htm->print; 
+    or
     $htm->print ('test.html');
 
-As a convenience the HTML::Macro::print function prints the processed template
-that would be returned by HTML::Macro::process, preceded by appropriate HTTP
-headers (Content-Type and no-cache directives).
 
-HTML::Macro::process attempts to perform a substitution on any word beginning
-and ending with single or double hashmarks (#) , such as ##NAME##.
-A word is any sequence of alphanumerics and underscores.  If the
-HTML::Macro has a matching variable, its value is substituted for the word in
-the template everywhere it appears.  A matching variable may match the
-template word literally, or it may match one of the following:
+    However note this would not be useful for printing a cached page since
+    as a convenience for use in web applications HTML::Macro::print prints
+    some HTTP headers prior to printing the page itself as returned by
+    HTML::Macro::process.
 
-the word with the delimiting hash marks stripped off ('NAME' in the example)
-the word without delimiters lowercased ('name')
-the word without delimiters uppercased ('NAME')
+=head1 Macro Expansion
+
+HTML::Macro::process attempts to perform a substitution on any word
+beginning and ending with single or double hashmarks (#) , such as
+##NAME##.  A word is any sequence of alphanumerics and underscores.  If the
+HTML::Macro has a matching variable, its value is substituted for the word
+in the template everywhere it appears.  A matching variable is determined
+based on a case-folding match with precedence as follows: exact match,
+lower case match, upper case match.  HTML::Macro macro names are case
+sensitive in the sense that you may define distinct macros whose names
+differ only by case.  However, matching is case-insensitive and follows the
+above precedence rules.  So :
+
+    $htm->set ('Name', 'Mike', 'NAME', 'MIKE', 'name', 'mike');
+
+results in the following substitutions:
+
+    Name => Mike
+    NAME => MIKE
+    name => mike
+    NAme => mike (same for any other string differing from 'name' only by case).
+
+If no value is found for a macro name, no substitution is performed, and
+this is not treated as an error.  This allows templates to be processed in
+more than one pass.  Possibly it would be useful to be able to request
+notification if any variables are not matched, or to request unmatched
+variables be mapped to an empty string.  However the convenience seems to
+be outweighed by the benefit of consistency since it easy to get confused
+if things like undefined variables are handled differently at different
+times.
 
 A typical usage is to stuff all the values returned from
 DBI::fetchrow_hashref into an HTML::Macro.  Then SQL column names are to be
@@ -1057,14 +1187,14 @@ for column names; providing the case insensitivity and stripping the
 underscores allows templates to be written in a portable fashion while
 preserving an upper-case convention for template variables.
 
-HTML entity quoting
+=head2 HTML entity quoting
 
-Variables surrounded by double delimiters are subject to HTML entity encoding.
-That is, >, < and ""  occuring in the variables value are replaced by their
-corresponding HTML entities.  Variables surrounded by single delimiters are not
-quoted; they are substituted "as is"
+Variables surrounded by double delimiters (##) are subject to HTML entity
+encoding.  That is, >, <, & and "" occuring in the variables value are
+replaced by their corresponding HTML entities.  Variables surrounded by
+single delimiters are not quoted; they are substituted "as is"
 
-Conditionals
+=head1 Conditionals
 
 Conditional tags take one of the following forms:
 
@@ -1100,168 +1230,190 @@ constructs such as:
 
 You have #NUM_ITEMS# item<if "#NUM_THINGS# > 1">s</if> in your basket.
 
-File Interpolation
+=head2 ifdef
+
+HTML::Macro also provides the <if def="variable-name"> conditional.  This
+construct evaluates to true if variable-name is defined and has a true
+value.  It might have been better to name this something different like <if
+set="variable"> ? Sometimes there is a need for if (defined (variable)) in
+the perl sense.  Also we occasionally want <if ndef="var"> but just use <if
+def="var"><else/> instead which seems adequate if a little clumsy.
+
+=head1 File Interpolation
 
 It is often helpful to structure HTML by separating commonly-used chunks
 (headers, footers, etc) into separate files.  HTML::Macro provides the
-<include/> tag for this purpose.  Markup such as <include/
-file="file.html"> gets replaced by the contents of file.html, which is
-itself subject to evaluation by HTML::Macro.  If the "asis" attribute is
-present: <include/ file="quoteme.html" asis>, the file is included "as is";
-without any further evaluation.
+<include /> tag for this purpose.  Markup such as <include file="file.html"
+/> gets replaced by the contents of file.html, which is itself subject to
+evaluation by HTML::Macro.  If the "asis" attribute is present: <include/
+file="quoteme.html" asis>, the file is included "as is"; without any
+further evaluation.
 
-Also, HTML::Macro provides support for an include path.  This allows common
-"part" files to be placed in a common place.  HTML::Macro::push_incpath adds
+HTML::Macro also supports an include path.  This allows common "part" files
+to be placed in a single central directory.  HTML::Macro::push_incpath adds
 to the path, as in $htm->push_incpath ("/path/to/include/files").  The
 current directory (of the file being processed) is always checked first,
 followed by each directory on the incpath.  When paths are added to the
 incpath they are always converted to absolute paths, relative to the
 working directory of the invoking script.  Thus, if your script is running
 in "/cgi-bin" and calls push_incpath("include"), this adds
-"/cgi-bin/include" to the incpath.
+"/cgi-bin/include" to the incpath. (Note that HTML::Macro never calls chdir
+as part of an effort to be thread-safe).
 
-Quoting
+Also note that during the processing of an included file, the folder in
+which the included file resides is pushed on to the incpath.  This means
+that relative includes work as you would expect in included files; a file
+found in a directory relative to the included file takes precedence over
+one found in a directory relative to the including file (or HTML::Macros
+global incpath).
 
-The preceding transformations can be inhibited by the use of the "<quote>"
-tag.  Any markup enclosed by <quote> ... </quote> is passed on as-is.
-quote tags may be nested to provide for multiple passes of macro
-substitution.
+=head1 Loops
 
-    This could be useful if you need to include markup like <if> in your
-    output, although that could be more easily accomplished by the usual
-    HTML entity encodings: escaping < with &lt; and so on.  The real reason
-    this is here is to enable multiple passes of HTML::Macro to run on "proto"
-    templates that just generate other templates.
+    The <loop> tag and the corresponding HTML::Macro::Loop object provide
+for repeated blocks of HTML, with subsequent iterations evaluated in
+different contexts.  Typically you will want to select rows from a database
+(lines from a file, files from a directory, etc), and present each
+iteration in succession using identical markup.  You do this by creating a
+<loop> tag in your template file containing the markup to be repeated, and
+by creating a correspondingly named Loop object attached to the HTML::Macro
+and containing all the data to be interpolated.  Note: this requires all
+data to be fetched and stored before it is applied to the template; there
+is no facility for streaming data.  For the intended use this is not a
+problem.  However it militates against using HTML::Macro for text
+processing of very large datasets.
 
-Quote tags have an optional "preserve" attribute.  If "preserve" is
-present, its value is evaluated (as with if above), and if the result is
-true, the quote tag is preserved in the output.  Otherwise, the tag is
-swallowed and the quoting behavior is inhibited.  So:
+  <loop id="people">
+    <tr><td>#first_name# #last_name#</td><td>#email#</td></tr>
+  </loop>
 
-<quote preserve="1">xyzzy<include/ file="foo"></quote>  
+    The loop tag allows the single attribute "id" which can be any
+    identifier.  Loop tags may be nested.  If during processing no matching
+    loop object is found, a warning is produced and the tag is simply
+    ignored.
 
-would be passed over unchanged,
+  $htm = new HTML::Macro;
+  $loop = $htm->new_loop('people', 'id', 'first_name', 'last_name', 'email');
+  $loop->push_array (1, 'frank', 'jones', 'frank@hotmail.com');
 
-and
+  Create a loop object using HTML::Macro::new_loop (or
+  HTML::Macro::Loop::new_loop for a nested loop).  The first argument is
+  the id of the loop and must match the id attribute of a tag in the
+  template (the match is case sensitive).  The remaining arguments are the
+  names of loop variables.
 
-<quote preserve="0"><include/ file="foo"></quote>
+  Append loop iterations (rows) by calling push_array with an array of
+  values corresponding to the loop variables declared when the loop was
+  created.
 
-would be replaced by the contents of the file named "foo".
+  An alternative is to use push_hash, which is analogous to
+HTML::Macro::set_hash; it sets up multiple variable substitutions.  If you
+use push_hash you don't have to declare the names of the variables when you
+create the loop object.  This allows them to be taken out of a hash and
+bound late, for example by names returned in a database query.
 
-    Loops
+  pushall_arrays is a shortcut that allows a number of loop iterations to
+be pushed at once.  It is typically used in conjunction with
+DBI::selectall_arrayref.
 
-The <loop> tag provides for repeated blocks of HTML, with
-subsequent iterations evaluated in different contexts.  For more about
-loops, see the IF:Page::Loop documentation.
+  is_empty returns a true value iff the loop has at least one row.
 
-New in 1.21:
+  keys returns a list of variable names defined in the (last row of the)
+  loop.
 
-Now allow normal XML-style for non-matched tags (like <else/> - we used to
-allow <else/ > and not <else />; now we allow both.
+=head1 Eval
 
-New in 1.20; 
+  <eval expr="perl expression"> ... </eval>
 
-File cache now respects modification times, reloading modified files.
+  You can evaluate arbitrary perl expressions (as long as you can place
+  them in an XML attribute between double quotes!).  The expression is
+  subject to macro substition, placed in a block and invoked as an
+  anonymous function whose single argument is an HTML::Macro object
+  representing the nested scope.  Any values set in the perl expression
+  thus affect the markup inside the eval tag.  The perl is evaluated after
+  setting the package to the HTML::Macro caller's package.
 
-Attribute handling was changed.  You should now specify attributes as a
-hash ref arg to new (like DBI).  Attributes to be specified (without a
-preceding '@') may be: collapse_whitespace, collapse_blank_lines, debug and
-precompile. 
-
-Collapse_whitespace is now called when loading (caching) files, for
-further optimization.  This means interpolated values are no longer
-collapsed; also any files read in by the user are not subject to
-collapsing.
-
-ColdFusion style quotes (<!--- ... --->) are now processed (by removing them).
-The processing is done when a file is read.
-
-
-New in 1.19; Various performance enhancements, including file caching.
-Included files, and templates read by HTML::Macro::new and process are
-cached in memory if the 'cache_files' attribute is true.  This can improve
-performance significantly if you include a file in a loop that is repeated
-often.  No attempt is made to detect when a file changes, so this cache is
-unsuitable for use with mod_perl.  I plan to add cache freshening at some
-point for just this reason.
-
-collapse_whitespace is now only called on the "final" pass of evaluation,
-saving considerable work.  Also, we attempt to make lighter use of cwd,
-which turns out to be expensive in many OS implementations since it calls
-`pwd`.  I am considering a rewrite of the entire mechanism for walking
-directories, but at least it runs reasonably fast now when you have a lot
-of includes.
-
-<eval/>: embedded perl evaluation
-
-New in 1.15, the <eval expr=""></eval> construct evaluates its expression
-attribute as Perl, in the package in which the HTML::Macro was created.
-This is designed to allow you to call out to a perl function, not to embed
-large blocks of code in the middle of your HTML, which we do not advocate.
-The expression attribute is treated as a Perl block (enclosed in curly
-braces) and passed a single argument: an HTML::Macro object whose content
-is the markup between the <eval> and </eval> tags, and whose attributes are
-inherited from the enclosing HTML::Macro.  The return value of the
-expression is interpolated into the output.  A typical use might be:
-
-Your user profile:
-<eval expr="&get_user_info">
-  #FIRST_NAME# #LAST_NAME# <br>
-  #ADDRESS## #CITY# #STATE# <br>
-</eval>
-
-where get_user_info is a function defined in the package that called
-HTML::Macro::process (or process_buf, or print...).  Presumably get_user_info will look something like:
-
-sub get_user_info
-{
-    my ($htm) = @_;
-    my $id = $htm->get ('user_id');
-    ... get database record for user with id $id ...;
-    $htm->set ('first_name', ...);
-    ...;
-    return $htm->process;
-}
-
-Note that the syntax
-used to call the function makes use of a special Perl feature that the @_ variable is automatically passed as an arg list when you use & and not () in the function call: a more explicit syntax would be:
-
-  <eval expr="&get_user_info(@_)">...
+  Note: typically we only use this to make a function call, and it would
+  probably be more efficient to optimize for that case - look for the
+  special case <eval function=""> to be implemented soon.  Also we might
+  like to provide a singleton eval that would operate in the current scope:
+  <eval function="perl_function" />.
 
 
-<define />
+=head1 Scope
 
-You can use the <define/> tag, as in:
+Each of the tags include, eval and loop introduce a nested "local" lexical
+scope.  Within a nested scope, a macro definition overrides any same-named
+macro in the enclosing scope and the value of the macro outside the nested
+scope is unaffected.  This is generally the expected behavior and makes it
+possible to write modular code.
 
- <define/ name="variable_name" value="variable_value">  
+Sometimes desirable to set values at a global scope when operating in a
+nested scope.  You do this using set_global.  set_global is totally
+analogous to set, but sets values in the outermost scope, whatever the
+current scope.
 
-to define HTML::Macro tags during the course of processing.  These
-definitions are processed in the same macro evaluation pass as all the
-other tags.  Hence the defined variable is only in scope after the
-definition, and any redefinition will override, in the way that you would
-expect.
+Another related function is set_ovalue.  Set_ovalue sets values in a
+parallel scope that takes precedence over the default scope (think
+"overridding" value).  We use set_ovalue to place request variables in a
+privileged scope so that their values override values fetched from the
+datbase.  Each nested lexical scope really contains two name spaces -
+values and ovalues, with ovalues taking precedence.  However, an inner
+scope always takes precedence over an outer scope.
 
-This feature is useful for passing arguments to functions called by eval.
+element Variable substitution
+within a loop follows the rule that loop keys take precedence over "global"
+variables set by the enclosing page (or any outer loop(s)).
 
-New in version 1.14:
+=head1 Define
 
-- The quote tag is now deprecated.  In its place, you should use tags with
-  an underscore appended to indicate tags to be processed by a
-  preprocessor.  Indicate that this is a preprocessing pass by setting the
-  variable '@precompile' to something true.  For example: <if_ expr="0">I
-  am a comment to be removed by a preprocessor.</if_> <if expr="#num# >
-  10">this if will be left unevaluated by a preprocessor.</if>
+You can set the value of a variable using the <define /> tag which requires
+two attributes: name and value.  This is only occasionally useful since
+mostly we set variable values in perl.  An example might be setting a value
+that is constant in an outer context but variable in an inner context, such
+as a navigation state:
 
-- Support for testing for the existence of a variable is now provided by
-  the if "def" attribute.  You used to have to do a test on the value of
-  the variable, which sometimes caused problems if the variable was a
-  complicated string with quotes in it.  Now you can say:
+<define name="nav_state" value="about" />
+<include file="nav.html" />
 
-  <if def="var"><b>#var#</b><br></if>
+We might want a more convenient syntax for this such as 
 
-  and so on.
+<define variable="value" />
 
-- If you set '@collapse_whitespace' the processor will collapse all
+but this seems somehow contravening the XML ideal since it would allow
+arbitrary attributes; we could never write any sort of DTD or schema.  And
+this whole feature is so little used that it doesn't seem worth it.
+
+=head1 Quoting
+
+For inserting block quotes in your markup that will be completely removed
+during macro processing, use <!--- --->.
+
+Also note that all macro and tag processing can be inhibited by the use of
+the "<quote>" tag.  Any markup enclosed by <quote> ... </quote> is passed
+on as-is.  However please don't rely on this as it is not all that useful
+and may go away.  The only real use for this was to support a
+pre-processing phase that could generate templates.  A new feature supports
+this better: any of the HTML::Macro tags may be written with a trailing
+underscore, as in <if_ expr="..."> ... </if_>.  Tags such as this are
+processed only if the preference variable '@precompile' is set, in which
+case unadorned tags are ignored.
+
+=head1 Attributes
+
+These are user-controllable attributes that affect the operation of
+HTML::Macro in one way or another.
+
+=head3 debug 
+
+Set to a true value, produces various diagnostic information on STDERR.  Default is false.
+
+=head3 precompile 
+
+If set, (only) tags with trailing underscores will be processed. Default is false.
+
+=head3 collapse_whitespace, collapse_blanklines
+
+ If you set '@collapse_whitespace' the processor will collapse all
   adjacent whitespace (including line terminators) to a single space.  An
   exception is made for markup appearing within <textarea>, <pre> and
   <quote> tags.  Similarly, setting '@collapse_blank_lines' (and not
@@ -1269,12 +1421,35 @@ New in version 1.14:
   terminators to be collapsed to a single newline character.  We use the
   former for a final pass in order to produce efficient HTML, the latter
   for the preprocessor, to improve the readability of generated HTML with a
-  lot of blank lines in it.
+  lot of blank lines in it.  Default for both is false.
 
-HTML::Macro is copyright (c) 2000,2001,2002 by Michael Sokolov and
-Interactive Factory (sm).  Some rights may be reserved.  This program is
-free software; you can redistribute it and/or modify it under the same
-terms as Perl itself.
+=head3 cache_files
+
+If set, files are read into and retrieved from an in-memory cache to
+improve performance for long-lived applications such as mod_perl and for
+situations in which the same file is read repeatedly during the processing
+of a single template.  This definitely helped in a scenario involving an
+include in side a loop, but it's not immediately clear why given that the
+operating system is probably caching recently-read files in memory anyway.
+The cache checks file modification times and reloads when a file changes.
+There is currently no limit to file cache size, which should definitely get
+changed.
+
+=head1 Idiosyncracies
+
+For hysterical reasons HTML::Macro allows a certain kind of non-XML; singleton tags are allowed to be written with the trailing slash immediately following the tag and separated from the closing > by white space.  EG:
+
+    <include/ file="foo"> is OK
+
+whereas XML calls for
+
+    <include file="foo" /> (which is also allowed here).
+
+
+HTML::Macro is copyright (c) 2000-2004 by Michael Sokolov and Interactive
+Factory (sm).  Some rights may be reserved.  This program is free software;
+you can redistribute it and/or modify it under the same terms as Perl
+itself.
 
 =head1 AUTHOR
 

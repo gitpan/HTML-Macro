@@ -1,2 +1,5 @@
 <eval expr="&set_val_to_world">Hello, #VAL#!</eval>
 <define/ name="val2" value="Hello">#VAL2#, World!
+<if def="val">ERROR</if><eval func="set_val_to_world_no_nest" />#VAL2#, #VAL#!
+<define name="val" value="" />#VAL2#, #VAL#World!
+<eval expr="&set_val_to_world_no_nest" />#VAL2#, #VAL#!

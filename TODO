@@ -1,5 +1,11 @@
-* do we really need to chdir when we read a file?
-* pass options in a hash so we don't have to replicate them in loop rows, etc.
-* make file cache optional and check file mod times if mod_perl
 * <elsif>
+* <ifndef>
+* <eval function="" />
+this is a good idea; funcall via pointer is about 40 times faster than eval
+(plus inevitable memory savings).  However many (most?) evals are caused by
+"if expr".
 * short form <eval/>
+* limit size of file cache - also test efficacy.
+** test on RedHat 9 showed no effect
+Loading the same file repeatedly; the cache had no appreciable effect.
+probably just uses extra memory.

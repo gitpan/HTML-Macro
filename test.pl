@@ -127,17 +127,23 @@ if ($result eq "This       has        extra\n    white     space\n<textarea name
 sub set_val_to_world
 {
     my ($htm) = @_;
-    $htm->set ('val', 'world');
+    $htm->set ('val', 'World');
     return $htm->process;
 }
 
+sub set_val_to_world_no_nest
+{
+    my ($htm) = @_;
+    $htm->set ('val', 'World');
+}
+
 $result = $ifp->process ('test-eval.html');
-if ($result eq "Hello, world!\nHello, World!")
+if ($result eq "Hello, World!\n" x 5)
 {
     print "ok 10\n";
 } else
 {
-    print "not ok 10: $result should be: Hello, world!\nHello, World!";
+    print "not ok 10:\n$result\nshould be:\n", ("Hello, World!\n" x 5);
 }
 
 $ifp->set_global ('val', -1);
@@ -148,17 +154,47 @@ if ($result eq "greater\nlessequal\n")
     print "ok 11\n";
 } else
 {
-    print "val=", $ifp->get ('val');
     print "not ok 11: $result\n";
+    print "val=", $ifp->get ('val'), "\n";
 }
 
-$ifp->set_ovalue ('yes', 0);
-$result = $ifp->process ('test3.html');
-if ($result eq "")
+$ifp->set_ovalue ('val', -1);
+$ifp->set_ovalue ('oval', 1);
+$result = $ifp->process ('test-global.html');
+if ($result eq "lessequal\ngreater\n")
 {
     print "ok 12\n";
 } else
 {
     print "not ok 12: $result\n";
     print "ovalues=", keys %{$ifp->{'@ovalues'}}, "\n";
+    print "val=", $ifp->get ('val'), "\n";
+}
+
+if (grep /oval/, $ifp->keys()) {
+    print "ok 13\n";
+} else {
+    print "not ok 13: keys does not contain oval\n";
+}
+
+eval {
+    $ifp->process ('test-error.txt');
+};
+
+if ($@ =~ qr{^HTML::Macro: error parsing 'if' attributes:  blah
+parsing test-error.txt on line 3, char 0
+
+<if blah>; the error should be at char 0
+
+called from test.pl, line }) {
+    print "ok 14\n";
+} else {
+    print "not ok 14: error handler produced $@\n";
+}
+
+$result = $ifp->process ('test-elsif.html');
+if ($result ne "one\ntwo\nthree\nfour\n") {
+    print "not ok 15: test-elsif produced $result\n";
+} else {
+    print "ok 15\n";
 }

@@ -200,45 +200,7 @@ HTML::Macro::Loop - looping construct for repeated HTML blocks
 
     Each loop body is treated as a nested HTML::Macro within which variable
 substitutions, conditions and nested loops are processed as described under
-HTML::Macro.
-    
-
-    Each call to push_array and push_hash inserts a new loop iteration.
-When the loop is evaluated these iterations are used (in the order they
-were inserted) to create HTML::Macros that are applied to the loop body.
-push_hash is analogous to HTML::Macro::set_hash; it sets up multiple variable
-substitutions.  push_array must be used in conjunction with declare.
-declare provides the list of keys that are implicitly associated with the
-values in the corresponding positions in the argument list of push_array.
-
-    An HTML::Macro::Loop object is associated with a loop tag by setting it to
-the value of the loop tag in an HTML::Macro.  This has the effect that the
-name spaces of page variables and loop tags overlap.
-
-For example:
-
-    $htm->set ('loop-tag', $loop);
-
-Ordinarily, however, loops are created using the HTML::Macro::new_loop
-function.  This first argument to new_loop is the loop tag; all subsequent
-arguments are loop keys.  
-
-Each iteration of the loop, created by calling push_arry or push_hash, sets
-a value for each of the declared loop keys.  If keys are not declared
-explicitly using new_loop, they may be declared implicitly by the first
-call to push_hash.  The number of elements in the arrays passed to
-push_array must match the number of declared loop keys.
-
-HTML::Macro::Loop::pushall_arrays is a shortcut that allows a number of loop
-iterations to be pushed at once.  It is typically used in conjunction with
-DBI::selectall_arrayref.
-
-Variable substitution within a loop follows the rule that loop keys take
-precedence over "global" variables set by the enclosing page (or any outer
-loop(s)).
-
-is_empty returns a true value iff the loop has at least one row.
-
+HTML::Macro. For complete documentation see HTML::Macro.
 =head1 AUTHOR
 
 Michael Sokolov, sokolov@ifactory.com
