@@ -18,7 +18,7 @@ require AutoLoader;
 @EXPORT = qw(
 	
 );
-$VERSION = '1.15';
+$VERSION = '1.17';
 
 
 # Preloaded methods go here.
@@ -136,7 +136,8 @@ sub doeval ($$)
     my $nested = new HTML::Macro;
     $nested->{'@parent'} = $self;
     $nested->{'@body'} = $body;
-    $nested->{'@incpath'} = $self->{'@incpath'};
+    my @incpath = @ {$self->{'@incpath'}};
+    $nested->{'@incpath'} = \@incpath; # make a copy of incpath
     $nested->{'@precompile'} = $self->{'@precompile'};
     $nested->{'@debug'} = $self->{'@debug'};
     $nested->{'@collapse_whitespace'} = $self->{'@collapse_whitespace'};
@@ -696,13 +697,13 @@ sub declare ($@)
 sub get_caller_info ($ )
 {
     my ($self) = @_;
-    my $pkg = __PACKAGE__;
+    my $pkg;
     my ($caller_file, $caller_line);
     my $stack_count = 0;
-    while ($pkg eq __PACKAGE__)
-    {
+    do {
         ($pkg, $caller_file, $caller_line) = caller ($stack_count++);
     }
+    while ($pkg =~ /HTML::Macro/) # ignore HTML::Macro and HTML::Macro::Loop
     $self->{'@caller_package'} = $pkg;
     $self->{'@caller_file'} = $caller_file;
     $self->{'@caller_line'} = $caller_line;
@@ -791,7 +792,13 @@ single quotes in perl or UNIX shells).  Conditionals are denoted by the
 Usage:
 
 Create a new HTML::Macro:
-  $htm = HTML::Macro->new();
+
+    $htm = new HTML::Macro  ('templates/page_template.html');
+
+The filename argument is optional.  If you do not specify it now, you can
+do it later, which might be useful if you want to use this HTML::Macro to
+operate on more than one template.  If you do specify the template when the
+object is created, the file is read in to memory at that time.
 
 Optionally, declare the names of all the variables that will be substituted
 on this page.  This has the effect of defining the value '' for all these
@@ -802,7 +809,7 @@ Set the values of one or more variables using HTML::Macro::set.
 
   $htm->set ('var', 'value');
 
-Or use IF:Page::set_hash to set a whole bunch of values at once.  Typically
+Or use HTML::Macro::set_hash to set a whole bunch of values at once.  Typically
 used with the value returned from a DBI::fetchrow_hashref.
 
   $htm->set_hash ( {'var' => 'value' } );
@@ -811,14 +818,20 @@ Finally, process the template and print the result using HTML::Macro::print,
 or save the value return by HTML::Macro::process.  
 
     open CACHED_PAGE, '>page.html';
-    print CACHED_PAGE, $htm->process ('templates/page_template.html');
+    print CACHED_PAGE, $htm->process;
+    # or: print CACHED_PAGE, $htm->process ('templates/page_template.html');
+
     close CACHED_PAGE;
  
     - or - 
 
+    $htm->print;
+
+    - or -
+
     $htm->print ('test.html');
 
-As a convenience the IF:Page::print function prints the processed template
+As a convenience the HTML::Macro::print function prints the processed template
 that would be returned by HTML::Macro::process, preceded by appropriate HTTP
 headers (Content-Type and no-cache directives).
 
@@ -931,11 +944,63 @@ and
 
 would be replaced by the contents of the file named "foo".
 
-Loops
+    Loops
 
-Finally, the <loop> tag provides for repeated blocks of HTML, with
+The <loop> tag provides for repeated blocks of HTML, with
 subsequent iterations evaluated in different contexts.  For more about
 loops, see the IF:Page::Loop documentation.
+
+    Eval blocks
+
+New in 1.15, the <eval expr=""></eval> construct evaluates its expression
+attribute as Perl, in the package in which the HTML::Macro was created.
+This is designed to allow you to call out to a perl function, not to embed
+large blocks of code in the middle of your HTML, which we do not advocate.
+The expression attribute is treated as a Perl block (enclosed in curly
+braces) and passed a single argument: an HTML::Macro object whose content
+is the markup between the <eval> and </eval> tags, and whose attributes are
+inherited from the enclosing HTML::Macro.  The return value of the
+expression is interpolated into the output.  A typical use might be:
+
+Your user profile:
+<eval expr="&get_user_info">
+  #FIRST_NAME# #LAST_NAME# <br>
+  #ADDRESS## #CITY# #STATE# <br>
+</eval>
+
+where get_user_info is a function defined in the package that called
+HTML::Macro::process (or process_buf, or print...).  Presumably get_user_info will look something like:
+
+sub get_user_info
+{
+    my ($htm) = @_;
+    my $id = $htm->get ('user_id');
+    ... get database record for user with id $id ...;
+    $htm->set ('first_name', ...);
+    ...;
+    return $htm->process;
+}
+
+Note that the syntax
+used to call the function makes use of a special Perl feature that the @_ variable is automatically passed as an arg list when you use & and not () in the function call: a more explicit syntax would be:
+
+<eval expr="&get_user_info(@_)">...
+
+
+    Define
+
+You can use the <define/> tag, as in:
+
+ <define/ name="variable_name" value="variable_value">  
+
+to define HTML::Macro tags during the course of processing.  These
+definitions are processed in the same macro evaluation pass as all the
+other tags.  Hence the defined variable is only in scope after the
+definition, and any redefinition will override, in the way that you would
+expect.
+
+This feature is useful for passing arguments to functions called by eval.
+
 
 New in version 1.14:
 
@@ -964,6 +1029,22 @@ New in version 1.14:
   former for a final pass in order to produce efficient HTML, the latter
   for the preprocessor, to improve the readability of generated HTML with a
   lot of blank lines in it.
+
+- Note that currently there is a bug with '@collapse_whitespace' and other
+  global settings stored in @-variables.  If you set them after creating 
+  loops then they are not inherited correctly by the loops.
+
+
+New in version 1.15:
+
+- eval tag
+- define tag
+- set takes multiple pairs of arguments
+- fixed bug with processing underscored tags (ie include_,loop_, etc..)
+  and whitespace removal
+- do substitutions on expressions to be evaluated
+- filename arg to HTML::Macro::new
+
 
 HTML::Macro is copyright (c) 2000,2001,2002 by Michael Sokolov and
 Interactive Factory (sm).  Some rights may be reserved.  This program is
