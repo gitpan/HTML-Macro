@@ -19,3 +19,15 @@ Revision history for Perl extension HTML::Macro
 1.13 Fri Jun 29 2001
 	renamed to HTML::Macro (was IF::Page) prior to upload to CPAN.
 	No longer support '_' as macro delimiter.
+
+1.14 Jan 2002
+        Added support for <if def>.  Now setting '@precompile' to true inhibits
+        processing of tags without trailing underscore (<if_>, <loop_>,
+        etc.)
+
+1.15 Wed Jan 16 2002
+        Added support for <eval> and <define>.
+        get now calls match_token.
+        constructor takes optional filename argument and file argument to
+        process and print is now optional.
+        improved context description when reporting errors

@@ -30,11 +30,11 @@ DLSRC = dl_dlopen.xs
 LD = gcc
 LDDLFLAGS = -shared -L/usr/local/lib
 LDFLAGS =  -L/usr/local/lib
-LIBC = /lib/libc-2.1.92.so
+LIBC = /lib/libc-2.2.4.so
 LIB_EXT = .a
 OBJ_EXT = .o
 OSNAME = linux
-OSVERS = 2.2.5-22smp
+OSVERS = 2.4.6-3.1enterprise
 RANLIB = :
 SO = so
 EXE_EXT = 
@@ -46,9 +46,9 @@ AR_STATIC_ARGS = cr
 NAME = HTML::Macro
 DISTNAME = HTML-Macro
 NAME_SYM = HTML_Macro
-VERSION = 1.13
-VERSION_SYM = 1_13
-XS_VERSION = 1.13
+VERSION = 1.15
+VERSION_SYM = 1_15
+XS_VERSION = 1.15
 INST_BIN = blib/bin
 INST_EXE = blib/script
 INST_LIB = blib/lib
@@ -659,7 +659,7 @@ testdb_static :: testdb_dynamic
 # --- MakeMaker ppd section:
 # Creates a PPD (Perl Package Description) for a binary distribution.
 ppd:
-	@$(PERL) -e "print qq{<SOFTPKG NAME=\"HTML-Macro\" VERSION=\"1,13,0,0\">\n}. qq{\t<TITLE>HTML-Macro</TITLE>\n}. qq{\t<ABSTRACT></ABSTRACT>\n}. qq{\t<AUTHOR></AUTHOR>\n}. qq{\t<IMPLEMENTATION>\n}. qq{\t\t<OS NAME=\"$(OSNAME)\" />\n}. qq{\t\t<ARCHITECTURE NAME=\"i386-linux\" />\n}. qq{\t\t<CODEBASE HREF=\"\" />\n}. qq{\t</IMPLEMENTATION>\n}. qq{</SOFTPKG>\n}" > HTML-Macro.ppd
+	@$(PERL) -e "print qq{<SOFTPKG NAME=\"HTML-Macro\" VERSION=\"1,15,0,0\">\n}. qq{\t<TITLE>HTML-Macro</TITLE>\n}. qq{\t<ABSTRACT></ABSTRACT>\n}. qq{\t<AUTHOR></AUTHOR>\n}. qq{\t<IMPLEMENTATION>\n}. qq{\t\t<OS NAME=\"$(OSNAME)\" />\n}. qq{\t\t<ARCHITECTURE NAME=\"i386-linux\" />\n}. qq{\t\t<CODEBASE HREF=\"\" />\n}. qq{\t</IMPLEMENTATION>\n}. qq{</SOFTPKG>\n}" > HTML-Macro.ppd
 
 # --- MakeMaker pm_to_blib section:
 

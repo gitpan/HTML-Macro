@@ -1,5 +1,5 @@
 # HTML::Macro; Macro.pm
-# Copyright (c) 2001 Michael Sokolov and Interactive Factory. Some rights
+# Copyright (c) 2001,2002 Michael Sokolov and Interactive Factory. Some rights
 # reserved. This program is free software; you can redistribute it and/or
 # modify it under the same terms as Perl itself.
 
@@ -18,7 +18,7 @@ require AutoLoader;
 @EXPORT = qw(
 	
 );
-$VERSION = '1.14';
+$VERSION = '1.15';
 
 
 # Preloaded methods go here.
@@ -79,6 +79,7 @@ sub collapse_whitespace
         } elsif (! $protect_whitespace && $tag !~ m|^/|) {
             $protect_whitespace = $tag;
         }
+        $pos = $nextpos;
     }
 
     # process trailing chunk
@@ -96,6 +97,9 @@ sub doloop ($$)
 {
     my ($self, $loop_id, $loop_body) = @_;
 
+    if ($self->{'@debug'}) {
+        print STDERR "HTML::Macro: processing loop $loop_id\n";
+    }
     my $p = $self;
     my $loop;
     while ($p) {
@@ -104,27 +108,54 @@ sub doloop ($$)
         # look for loops in outer scopes
         $p = $p->{'@parent'};
         last if !$p;
-        $p = $p->{'@parent'};
-        die if ! $p;
+        if ($p->isa('HTML::Macro::Loop'))
+        {
+            $p = $p->{'@parent'};
+            die if ! $p;
+        }
     }
     if (! $loop ) {
         $self->warning ("no match for loop id=$loop_id");
-        return ;
+        return '';
     }
     if (!ref $loop || ! $loop->isa('HTML::Macro::Loop'))
     {
-        $self->warning ("doloop: $loop (substitution for loop id \"$loop_id\") is not a HTML::Macro::Loop!");
-        return ;
+        $self->error ("doloop: $loop (substitution for loop id \"$loop_id\") is not a HTML::Macro::Loop!");
     }
     $loop_body = $loop->doloop ($loop_body);
     #$loop_body = $self->dosub ($loop_body);
     return $loop_body;
 }
 
+sub doeval ($$)
+{
+    my ($self, $expr, $body) = @_;
+    if ($self->{'@debug'}) {
+        print STDERR "HTML::Macro: processing eval: { $expr }\n";
+    }
+    my $nested = new HTML::Macro;
+    $nested->{'@parent'} = $self;
+    $nested->{'@body'} = $body;
+    $nested->{'@incpath'} = $self->{'@incpath'};
+    $nested->{'@precompile'} = $self->{'@precompile'};
+    $nested->{'@debug'} = $self->{'@debug'};
+    $nested->{'@collapse_whitespace'} = $self->{'@collapse_whitespace'};
+    $nested->{'@collapse_blank_lines'} = $self->{'@collapse_blank_lines'};
+    my $package = $self->{'@caller_package'};
+    my $result = eval " & {package $package; sub { $expr } } (\$nested)";
+    if ($@) {
+        $self->error ("error evaluating '$expr': $@");
+    }
+    return $result;
+}
+
 sub match_token ($$)
 {
     my ($self, $var) = @_;
 
+    if ($self->{'@debug'}) {
+        print STDERR "HTML::Macro: matching token $var\n";
+    }
     # these are the two styles we've used
     my $val;
     while (1) 
@@ -137,8 +168,14 @@ sub match_token ($$)
         # include outer loops in scope
         my $parent = $self->{'@parent'} || '';
         last if !$parent;
-        $self = $parent->{'@parent'};
-        die if ! $self;
+        # parent may be either an HTML::Macro or an HTML::Macro::Loop
+        if ($parent->isa('HTML::Macro::Loop'))
+        {
+            $self = $parent->{'@parent'};
+            die if ! $self;
+        } else {
+            $self = $parent;
+        }
     }
     return defined($val) ? $val : undef;
 }
@@ -185,17 +222,30 @@ sub openfile
 {
     my ($self, $fname) = @_;
     my @incpath = @ {$self->{'@incpath'}};
-    unshift (@incpath, '.');
-    while (my $dir = pop @incpath)
+    push (@incpath, '');
+    while (@incpath)
     {
-        if (open (FILE, $dir . '/' . $fname))
+        my $dir = pop @incpath;
+        if (-f $dir . $fname)
         {
+            open (FILE, $dir . $fname) || 
+                $self->error ("Cannot open $dir$fname: $!");
+
+            if ($self->{'@debug'}) {
+                print STDERR "HTML::Macro: opening $dir/$fname, incpath=@incpath, cwd=", cwd, "\n";
+            }
+            $self->{'@file'} = $dir . $fname;
+
             # change directories so relative includes work
             # remember where we are so we can get back here
 
             my $cwd = cwd;
             push @ {$self->{'@cdpath'}}, $cwd;
-            chdir ($dir);
+
+            # add our current directory to incpath so includes from other directories
+            # will still look here
+            push @ {$self->{'@incpath'}}, $dir =~ m|^/| ? $dir : "$cwd/$dir";
+            chdir ($dir) if $dir;
             my (@path) = split m|/|, $fname;
             if (@path > 1)
             {
@@ -208,7 +258,7 @@ sub openfile
             return *FILE{IO};
         }
     }
-    $self->error ("Cannot find $fname; incpath=". join ('; ', @ {$self->{'@incpath'}}));
+    $self->error ("Cannot find $fname; cwd=" . cwd . ", incpath=". join ('; ', @ {$self->{'@incpath'}}));
     return undef;               # unreachable
 }
 
@@ -217,7 +267,7 @@ sub doinclude ($$)
     my ($self, $include) = @_;
     my $lastpos = 0;
     $include = $self->dosub ($include);
-    if ($include !~ m|<include/\s+file="(.*?)"\s*(asis)?\s*>|sgi)
+    if ($include !~ m|<include_?/\s+file="(.*?)"\s*(asis)?\s*>|sgi)
     {
         $self->error ("bad include ($include)");
     }
@@ -233,7 +283,9 @@ sub doinclude ($$)
 
         close $fh;
         my $lastdir = pop @ {$self->{'@cdpath'}};
-        chdir $lastdir;
+        chdir $lastdir if $lastdir;
+
+        pop @ {$self->{'@incpath'}};
 
         return $result;
     } else 
@@ -245,6 +297,7 @@ sub doinclude ($$)
 sub process_buf ($$)
 {
     my ($self, $buf) = @_;
+    return '' if ! $buf;
     my $out = '';
     my @tag_stack = ();
     my $pos = 0;
@@ -253,17 +306,23 @@ sub process_buf ($$)
     my $false = 0;
     my $emitting = 1;
     my $vanilla = 1;
+    my $underscore = $self->{'@precompile'} ? '_' : '';
     while ($buf =~ m{(< \s*
-                      (/?loop|/?if|include/|/?else/?|/?quote)(_?)
+                      (/?loop|/?if|include|/?else|/?quote|/?eval|define)$underscore(/?)
                       (   (?: \s+\w+ \s* = \s* "[^\"]*") |    # quoted attrs
                           (?: \s+\w+ \s* =[^>\"]) | # attrs w/ no quotes
                           (?: \s+\w+) # attrs with no value
                        ) *          
                       >)}sgix)
     {
-        my ($match, $tag, $underscore, $attrs) = ($1, lc $2, $3, $4);
-        next if ($self->{'@precompile'} && !$underscore);
-        my $nextpos = (pos $buf) - (length ($match));
+        my ($match, $tag, $slash, $attrs) = ($1, lc $2, $3, $4);
+        my $nextpos = (pos $buf) - (length ($&));
+        if (! $slash && ($tag eq 'include' || $tag eq 'define'))
+        {
+            $slash = 1;
+            $self->warning ("missing trailing slash for $tag", $nextpos);
+        }
+        $tag .= '/' if $slash;
         $emitting = ! ($false || $looping);
         $vanilla = !($quoting || $false || $looping);
         if ($vanilla)
@@ -271,7 +330,7 @@ sub process_buf ($$)
             $out .= $self->dosub 
                 (substr ($buf, $pos, $nextpos - $pos));
             # skip over the matched tag; handling any state changes below
-            $pos = $nextpos + length($match);
+            $pos = $nextpos + length($&);
         }
         elsif ($quoting)
         {
@@ -283,7 +342,7 @@ sub process_buf ($$)
                     if (! $matching_tag);
                 my ($start_tag, $attr) = @$matching_tag;
                 $self->error ("start tag $start_tag ends with end tag 'quote'",
-                        $nextpos)
+                              $nextpos)
                     if ($start_tag ne 'quote');
                 if ($emitting && !$attr)
                 {
@@ -319,14 +378,21 @@ sub process_buf ($$)
             # the matched tag
             $pos = $nextpos + length($match);
         }
-        if ($tag eq 'loop')
+        if ($tag eq 'loop' || $tag eq 'eval')
+            # loop and eval are similar in their syntactic force - both are block-level
+            # tags that force embedded scopes.  Therefore their contents are processed
+            # in a nested evaluation, and not here.
         {
-            $match =~ /id="([^\"]*)"/ || $match =~ /id=(\S+)/;
-            push @tag_stack, ['loop', $1, $nextpos];
+            (($tag eq 'loop') &&
+             $match =~ /id="([^\"]*)"/ || $match =~ /id=(\S+)/) ||
+                 # (tag eq 'eval') &&
+                 $match =~ /expr="([^\"]*)"/ ||
+                     $self->error ("$tag tag has no id '$match'", $nextpos);
+            push @tag_stack, [$tag, $1, $nextpos];
             ++$looping;
             next;
         }
-        if ($tag eq '/loop')
+        if ($tag eq '/loop' || $tag eq '/eval')
         {
             my $matching_tag = pop @tag_stack;
             $self->error ("no match for tag '$tag'", $nextpos)
@@ -339,8 +405,15 @@ sub process_buf ($$)
             -- $looping;
             if (!$looping && !$quoting && !$false)
             {
-                $out .= $self->doloop 
-                    ($attr, substr ($buf, $pos, $nextpos-$pos));
+                $attr = $self->dosub ($attr);
+                if ($tag eq '/loop') {
+                    $out .= $self->doloop 
+                        ($attr, substr ($buf, $pos, $nextpos-$pos));
+                } else {
+                    # tag=eval
+                    $out .= $self->doeval
+                        ($attr, substr ($buf, $pos, $nextpos-$pos));
+                }
                 $pos = $nextpos + length($match);
             }
             next;
@@ -440,7 +513,7 @@ sub process_buf ($$)
             }
             next;
         }
-        if ($tag eq 'else/')
+        elsif ($tag eq 'else/')
         {
             my $top = $tag_stack[$#tag_stack];
             $self->error ("<else/> not in <if>", $nextpos) 
@@ -454,7 +527,7 @@ sub process_buf ($$)
             }
             next;
         }
-        if ($tag eq 'else')
+        elsif ($tag eq 'else')
         {
             my $top = $tag_stack[$#tag_stack];
             $self->error ("<else> not in <if>", $nextpos) if $$top[0] ne 'if';
@@ -462,17 +535,33 @@ sub process_buf ($$)
             push @tag_stack, ['else', $false];
             next;
         }
-        if ($tag eq 'include/')
+        elsif ($tag eq 'include/')
         {
             my $file = $self->{'@file'};
             $out .= $self->doinclude ($match) if ($vanilla);
             $self->{'@file'} = $file;
             next;
         }
+        elsif ($tag eq 'define/')
+        {
+            if (!$looping && !$quoting && !$false)
+            {
+                $match =~ /name="([^\"]*)"/ || 
+                    $self->error ("no name attr for define tag in '$match'",
+                                  $nextpos);
+                my ($name) = $1;
+                $match =~ /value="([^\"]*)"/ || 
+                    $self->error ("no value attr for define tag in '$match'",
+                                  $nextpos);
+                my ($val) = $1;
+                $self->set ($name, $self->dosub($val));
+            }
+        }
 
     }
     # process trailer
-    if ($quoting || $looping || $false)
+    #if ($quoting || $looping || $false)
+    while (@tag_stack)
     {
         my $tag = pop @tag_stack;
         $self->error ("EOF while still looking for close tag for " . $$tag[0]
@@ -492,7 +581,7 @@ sub process_buf ($$)
     return $out;
 }
 
-sub process ($$)
+sub readfile
 {
     my ($self, $fname) = @_;
 
@@ -501,18 +590,23 @@ sub process ($$)
     #open (HTML, $fname) || $self->error ("can't open $fname: $!");
     my $separator = $/;
     undef $/;
-    my $html = <$fh>;
+    $$self{'@body'} = <$fh>;
     $/ = $separator;
     close $fh;
 
-    # for error reporting
-    $self->{'@file'} = $fname;
+    #warn "nothing read from $fname" if ! $$self{'@body'};
+}
 
-    warn "nothing read from $fname" if ! $html;
-    my $result =  $self->process_buf ($html);
+sub process ($$)
+{
+    my ($self, $fname) = @_;
+    &readfile if ($fname);
+
+    my $result =  $self->process_buf ($$self{'@body'});
     
     my $lastdir = pop @ {$self->{'@cdpath'}};
-    chdir $lastdir;
+    chdir $lastdir if $lastdir;
+    pop @ {$self->{'@incpath'}};
 
     return $result;
 }
@@ -525,25 +619,27 @@ sub print ($$)
     print "Cache-Control: no-cache\n";
     print "Pragma: no-cache\n";
     print "Content-Type: text/html\n\n";
-    print $self->process ($fname);
+    print &process;
 }
 
 sub error
 {
     my ($self, $msg, $pos) = @_;
+    $self->get_caller_info;
     $msg = "HTML::Macro: $msg";
-    $msg .= " in file " . $self->{'@file'} if ($self->{'@file'});
+    $msg .= " parsing " . $self->{'@file'} if ($self->{'@file'});
     $msg .= " near char $pos" if $pos;
-    die "$msg\n";
+    die "$msg\ncalled from " . $self->{'@caller_file'} . ", line " . $self->{'@caller_line'} . "\n";
 }
 
 sub warning
 {
     my ($self, $msg, $pos) = @_;
+    $self->get_caller_info;
     $msg = "HTML::Macro: $msg";
-    $msg .= " in file " . $self->{'@file'} if ($self->{'@file'});
+    $msg .= " parsing " . $self->{'@file'} if ($self->{'@file'});
     $msg .= " near char $pos" if $pos;
-    warn "$msg\n";
+    warn "$msg\ncalled from " . $self->{'@caller_file'} . ", line " . $self->{'@caller_line'} . "\n";
 }
 
 sub set ($$)
@@ -559,13 +655,17 @@ sub set ($$)
 
 sub push_incpath ($ )
 {
-    my ($self, $dir) = @_;
-    if (substr($dir,0,1) ne '/')
+    my ($self) = shift;
+    while (my $dir = shift)
     {
-        # turn into an absolute path if not already
-        $dir = cwd . '/' . $dir;
+        $dir .= '/' if $dir !~ m|/$|;
+        if (substr($dir,0,1) ne '/')
+        {
+            # turn into an absolute path if not already
+            $dir = cwd . '/' . $dir;
+        }
+        push @ {$self->{'@incpath'}}, $dir;
     }
-    push @ {$self->{'@incpath'}}, $dir;
 }
 
 sub set_hash ($ )
@@ -578,9 +678,11 @@ sub set_hash ($ )
 }
 
 sub get ($ )
+# finds values in enclosing scopes and uses macro case-collapsing rules; ie
+# matches $var, $uc var, or lc $var
 {
     my ($self, $var) = @_;
-    return $$self {$var};
+    return $self->match_token ($var);
 }
 
 sub declare ($@)
@@ -591,12 +693,29 @@ sub declare ($@)
     @$self {@vars} = ('') x @vars;
 }
 
-sub new ($ )
+sub get_caller_info ($ )
 {
-    my ($class) = @_;
+    my ($self) = @_;
+    my $pkg = __PACKAGE__;
+    my ($caller_file, $caller_line);
+    my $stack_count = 0;
+    while ($pkg eq __PACKAGE__)
+    {
+        ($pkg, $caller_file, $caller_line) = caller ($stack_count++);
+    }
+    $self->{'@caller_package'} = $pkg;
+    $self->{'@caller_file'} = $caller_file;
+    $self->{'@caller_line'} = $caller_line;
+}
+
+sub new ($$ )
+{
+    my ($class, $fname) = @_;
     my $self = { };
     $self->{'@incpath'} = [];
     bless $self, $class;
+    $self->get_caller_info();   # need to know caller's package for eval to work
+    &readfile($self, $fname) if ($fname);
     return $self;
 }
 
@@ -613,6 +732,14 @@ sub new_loop ()
     return $new_loop;
 }
 
+sub keys ()
+{
+    my ($self) = @_;
+    my @keys = grep /^[^@]/, keys %$self;
+    push @keys, $self->{'@parent'}->keys() if $self->{'@parent'};
+    return @keys;
+}
+
 1;
 __END__
 
@@ -623,10 +750,10 @@ HTML::Macro - generate dynamic HTML pages using templates
 =head1 SYNOPSIS
 
   use HTML::Macro;
-  $ifp = HTML::Macro->new();
-  $ifp->declare ('var', 'missing');
-  $ifp->set ('var', 'value');
-  $ifp->print ('test.html');
+  $htm = HTML::Macro->new();
+  $htm->declare ('var', 'missing');
+  $htm->set ('var', 'value');
+  $htm->print ('test.html');
 
 =head1 DESCRIPTION
 
@@ -664,32 +791,32 @@ single quotes in perl or UNIX shells).  Conditionals are denoted by the
 Usage:
 
 Create a new HTML::Macro:
-  $ifp = HTML::Macro->new();
+  $htm = HTML::Macro->new();
 
 Optionally, declare the names of all the variables that will be substituted
 on this page.  This has the effect of defining the value '' for all these
 variables.
-  $ifp->declare ('var', 'missing');
+  $htm->declare ('var', 'missing');
 
 Set the values of one or more variables using HTML::Macro::set.
 
-  $ifp->set ('var', 'value');
+  $htm->set ('var', 'value');
 
 Or use IF:Page::set_hash to set a whole bunch of values at once.  Typically
 used with the value returned from a DBI::fetchrow_hashref.
 
-  $ifp->set_hash ( {'var' => 'value' } );
+  $htm->set_hash ( {'var' => 'value' } );
 
 Finally, process the template and print the result using HTML::Macro::print,
 or save the value return by HTML::Macro::process.  
 
     open CACHED_PAGE, '>page.html';
-    print CACHED_PAGE, $ifp->process ('templates/page_template.html');
+    print CACHED_PAGE, $htm->process ('templates/page_template.html');
     close CACHED_PAGE;
  
     - or - 
 
-    $ifp->print ('test.html');
+    $htm->print ('test.html');
 
 As a convenience the IF:Page::print function prints the processed template
 that would be returned by HTML::Macro::process, preceded by appropriate HTTP
@@ -768,7 +895,7 @@ without any further evaluation.
 
 Also, HTML::Macro provides support for an include path.  This allows common
 "part" files to be placed in a common place.  HTML::Macro::push_incpath adds
-to the path, as in $ifp->push_incpath ("/path/to/include/files").  The
+to the path, as in $htm->push_incpath ("/path/to/include/files").  The
 current directory (of the file being processed) is always checked first,
 followed by each directory on the incpath.  When paths are added to the
 incpath they are always converted to absolute paths, relative to the

@@ -1,5 +1,5 @@
 # HTML::Macro::Loop; Loop.pm
-# Copyright (c) 2001 Michael Sokolov and Interactive Factory. All rights
+# Copyright (c) 2001,2002 Michael Sokolov and Interactive Factory. All rights
 # reserved. This program is free software; you can redistribute it and/or
 # modify it under the same terms as Perl itself.
 
@@ -29,7 +29,12 @@ sub new ($$$)
     my $self = {
         'vars' => [],
         'rows' => [],
+        '@debug' => $page->{'@debug'} || 0,
+        '@collapse_whitespace' => $page->{'@collapse_whitespace'},
+        '@collapse_blank_lines' => $page->{'@collapse_blank_lines'},
         '@parent' => $page,
+        '@incpath' => $page->{'@incpath'},
+        '@precompile' => $page->{'@precompile'} || 0,
         };
     bless $self, $class;
     return $self;
@@ -50,14 +55,26 @@ sub push_array ($@)
     my ($self, @vals) = @_;
     die "HTML::Macro::Loop::push_array: number of vals pushed(" . (@vals+0) . ") does not match number declared: " . (@ {$$self{'vars'}} + 0)
         if (@vals + 0 != @ {$$self{'vars'}});
-    my $row = HTML::Macro->new;
+    my $row = &new_row;
     my $i = 0;
     foreach my $var (@ {$$self{'vars'}})
     {
         $row->set ($var, $vals[$i++]);
     }
-    $row->set ('@parent', $self);
     push @ {$$self{'rows'}}, $row;
+}
+
+sub new_row
+{
+    my ($self) = @_;
+    my $row = new HTML::Macro;
+    $row->set ('@parent', $self);
+    $row->{'@debug'} = $self->{'@debug'};
+    $row->{'@collapse_whitespace'} = $self->{'@collapse_whitespace'};
+    $row->{'@collapse_blank_lines'} = $self->{'@collapse_blank_lines'};
+    $row->{'@incpath'} = $self->{'@incpath'};
+    $row->{'@precompile'} = $self->{'@precompile'};
+    return $row;
 }
 
 sub pushall_arrays ($@)
@@ -79,14 +96,13 @@ sub push_hash ($$)
 {
     my ($self, $pvals) = @_;
     my @ordered_vals;
-    my $row = HTML::Macro->new;
+    my $row = &new_row;
     $self->declare (keys %$pvals) if (!@ {$$self{'vars'}}) ;
     my $i = 0;
     foreach my $var (@ {$$self{'vars'}})
     {
         $row->set ($var, defined($$pvals{$var}) ? $$pvals{$var} : '');
     }
-    $row->set ('@parent', $self);
     push @ {$$self{'rows'}}, $row;;
 }
 
@@ -121,16 +137,31 @@ sub doloop ($$ )
 sub new_loop ()
 {
     my ($self, $name, @loop_vars) = @_;
-    my $new_loop = HTML::Macro::Loop->new();
+
+    my $rows = $$self{'rows'};
+    my $new_loop = new HTML::Macro::Loop ($$rows [$#$rows]);
+
     if ($name) {
         $self->set ($name, $new_loop);
-        my $rows = $$self{'rows'};
-        $new_loop->{'@parent'} = $$rows [$#$rows];
-        if (@loop_vars) {
-            $new_loop->declare (@loop_vars);
-        }
+    }
+    if (@loop_vars) {
+        $new_loop->declare (@loop_vars);
     }
     return $new_loop;
+}
+
+sub is_empty ()
+{
+    my ($self) = @_;
+    return ! ($self->{'rows'} && (@ {$self->{'rows'}} > 0));
+}
+
+sub keys ()
+{
+    my ($self) = @_;
+    return () if $self->is_empty();
+    my $rows = $$self{'rows'};
+    return ($$rows [$#$rows])->keys();
 }
 
 # Autoload methods go after =cut, and are processed by the autosplit program.
@@ -147,11 +178,11 @@ HTML::Macro::Loop - looping construct for repeated HTML blocks
 
   use HTML::Macro;
   use HTML::Macro::Loop;
-  $ifp = HTML::Macro->new();
-  $loop = $ifp->new_loop('loop-body', 'id', 'name', 'phone');
+  $htm = HTML::Macro->new();
+  $loop = $htm->new_loop('loop-body', 'id', 'name', 'phone');
   $loop->push_array (1, 'mike', '222-2389');
   $loop->push_hash ({ 'id' => 2, 'name' => 'lou', 'phone' => '111-2389'});
-  $ifp->print ('test.html');
+  $htm->print ('test.html');
 
 =head1 DESCRIPTION
 
@@ -178,7 +209,7 @@ name spaces of page variables and loop tags overlap.
 
 For example:
 
-    $ifp->set ('loop-tag', $loop);
+    $htm->set ('loop-tag', $loop);
 
 Ordinarily, however, loops are created using the HTML::Macro::new_loop
 function.  This first argument to new_loop is the loop tag; all subsequent
@@ -197,6 +228,8 @@ DBI::selectall_arrayref.
 Variable substitution within a loop follows the rule that loop keys take
 precedence over "global" variables set by the enclosing page (or any outer
 loop(s)).
+
+is_empty returns a true value iff the loop has at least one row.
 
 =head1 AUTHOR
 

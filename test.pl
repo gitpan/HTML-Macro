@@ -105,7 +105,7 @@ if ($result eq 'included file stuff.htmlincluded file substuff.html')
 
 $ifp->set ('@collapse_whitespace', 1);
 $result = $ifp->process ('test7.html');
-if ($result eq 'This has extra white space end ')
+if ($result eq "This has extra white space <textarea name=\"test\">\nbut\npreserve\nthis\n</textarea> end ")
 {
     print "ok 8\n";
 } else
@@ -116,11 +116,26 @@ if ($result eq 'This has extra white space end ')
 $ifp->set ('@collapse_whitespace', 0);
 $ifp->set ('@collapse_blank_lines', 1);
 $result = $ifp->process ('test7.html');
-if ($result eq "This       has        extra\n    white     space\nend\n")
+if ($result eq "This       has        extra\n    white     space\n<textarea name=\"test\">\nbut\npreserve\nthis\n</textarea>\nend\n")
 {
     print "ok 9\n";
 } else
 {
-    print "not ok 9: $result\nshould be:\nThis has extra\n    white     space\nend\n";
+    print "not ok 9: $result\nshould be:This       has        extra\n    white     space\n<textarea name=\"test\">\nbut\npreserve\nthis\n</textarea>\nend\n";
 }
 
+sub set_val_to_world
+{
+    my ($htm) = @_;
+    $htm->set ('val', 'world');
+    return $htm->process;
+}
+
+$result = $ifp->process ('test-eval.html');
+if ($result eq "Hello, world!\nHello, World!")
+{
+    print "ok 10\n";
+} else
+{
+    print "not ok 10: $result should be: Hello, world!\nHello, World!";
+}

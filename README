@@ -8,8 +8,8 @@ use is not restricted to HTML; we have also used it for generating email
 and other text files, but the tagging syntax is derived from HTML/XML.
 
 Installation is totally vanilla; just unpack the distribution,
-> tar xvfz HTML-Macro-1.13.tgz
-> cd HTML-Macro-1.13
+> tar xvfz HTML-Macro-1.14.tgz
+> cd HTML-Macro-1.14
 > perl Makefile.PL
 > make install (prob. as root)
 
@@ -20,6 +20,6 @@ For more info, please see the written documentation:
 There is also a web page about HTML::Macro maintained at
 http:://www.ifactory.com/htmlmacro.
 
-Copyright (c) 2001 Michael Sokolov and Interactive Factory. All rights
+Copyright (c) 2001,2002 Michael Sokolov and Interactive Factory. Some rights
 reserved. This program is free software; you can redistribute it and/or
 modify it under the same terms as Perl itself.

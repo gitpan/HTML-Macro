@@ -74,3 +74,18 @@ if ($result eq "\n  <quote preserve=\"#QUOTEME#\">\n    <quote><if expr=\"0\">0<
     print "not ok 4: $result\nshould be:";
     print "\n  <quote preserve=\"#QUOTEME#\">\n    <quote><if expr=\"0\">0</if></quote>\n  </quote>\n\n";
 }
+
+$ifp = new HTML::Macro;
+$ifp->set ('@precompile', 1);
+$testloop = $ifp->new_loop ('testloop', 'dummy');
+$testloop->push_hash ({'dummy' => 1});
+$result = $ifp->process ('test5.html');
+if ($result eq '<if expr="0">don\'t evaluate me</if>')
+{
+    print "ok 5\n";
+} else
+{
+    print "not ok 5: $result\nshould be:";
+    print '<if expr="0">don\'t evaluate me</if>';
+    print "\ngot: $result\n";
+}
