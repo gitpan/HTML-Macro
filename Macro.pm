@@ -18,7 +18,7 @@ require AutoLoader;
 @EXPORT = qw(
 	
 );
-$VERSION = '1.20';
+$VERSION = '1.21';
 
 
 # Preloaded methods go here.
@@ -166,9 +166,10 @@ sub match_token ($$)
     my $val;
     while (1) 
     {
-        $val = defined($$self{$var}) ? ($$self{$var})
-                : ( defined ($$self{lc $var}) ? ($$self{lc $var})
-                    : $$self{uc $var});
+        $val = exists($$self{$var}) ? (defined($$self{$var}) ?  $$self{$var} : '')
+                : ( exists ($$self{lc $var}) ? (defined($$self{lc $var}) ? $$self{lc $var} : '')
+                    : (exists $$self{uc $var} ? (defined($$self{uc $var}) ? $$self{uc $var} : '')
+                       : undef) );
         last if (defined ($val));
 
         # include outer loops in scope
@@ -228,13 +229,16 @@ sub findfile
 {
     my ($self, $fname) = @_;
     my @incpath = @ {$self->{'@incpath'}};
-    push (@incpath, '');
+    unshift (@incpath, '') unless ($self->{'@no_local_incpath'});
     while (@incpath)
     {
-        my $dir = pop @incpath;
+        my $dir = shift @incpath;
         my @stat = stat $dir . $fname;
         return ($dir . $fname, $stat[9]) if @stat;
     }
+    @incpath = @ {$self->{'@incpath'}};
+    $self->error ("Cannot find file $fname, incpath=" . join (',',@incpath)
+                  . "cwd=" . cwd);
     return ();
 }
 
@@ -246,7 +250,7 @@ sub openfile
     my @incpath = @ {$self->{'@incpath'}};
 
     open (FILE, $path) || 
-        $self->error ("Cannot open $path: $!");
+        $self->error ("Cannot open '$path': $!");
 
     if ($self->{'@attr'}->{'debug'}) {
         print STDERR "HTML::Macro: opening $path, incpath=@incpath, cwd=", cwd, "\n";
@@ -267,9 +271,10 @@ sub openfile
     }
 
     # add our current directory to incpath so includes from other directories
-    # will still look here
+    # will still look here - if $dir is not an absolute path.  Recognizes
+    # drive letters even if this is !Windows. oh well
 
-    $dir = "$cwd/$dir" if $dir !~ m|^/|;
+    $dir = "$cwd/$dir" if ($dir !~ m|^([A-Za-z]:)?/|);
     $dir =~ s|//+|/|g;          # remove double slashes
 
     push @ {$self->{'@incpath'}}, $dir;
@@ -355,10 +360,11 @@ sub process_buf ($$)
                           (?: \s+\w+ \s* =[^>\"]) | # attrs w/ no quotes
                           (?: \s+\w+) # attrs with no value
                        ) * \s*         
-                      >)}sgix)
+                      (/?)>)}sgix)
     {
-        my ($match, $tag, $slash, $attrs) = ($1, lc $2, $3, $4);
+        my ($match, $tag, $slash, $attrs, $slash2) = ($1, lc $2, $3, $4, $5);
         my $nextpos = (pos $buf) - (length ($&));
+        $slash = $slash2 if ! $slash; # allow normal XML style
         if (! $slash && ($tag eq 'include' || $tag eq 'define'))
         {
             $slash = 1;
@@ -613,6 +619,19 @@ sub process_buf ($$)
     }
     $out .= $self->dosub (substr ($buf, $pos));
     print STDERR "Exiting process_buf\n" if ($self->{'@attr'}->{'debug'});
+    # remove extra whitespace
+
+    if ($self->{'@attr'}->{'collapse_whitespace'})
+    {
+        # collapse adjacent white space
+        $out = &collapse_whitespace ($out, undef);
+    }
+    elsif ($self->{'@attr'}->{'collapse_blank_lines'})
+    {
+        # remove blank lines
+        $out = &collapse_whitespace ($out, 1);
+    }
+
     return $out;
 }
 
@@ -625,7 +644,10 @@ sub readfile
     my $key = $cwd . '/' . $fname;
 
     my ($path, $mtime) = $self->findfile ($fname);
-
+    if (!$path) {
+        $self->error ("$fname not found: incpath=(" . join (',',@{$$self{'@incpath'}}) . ")");
+        return;
+    }
     if ($self->{'@attr'}->{'cache_files'} && exists $file_cache{$key}
         && $file_cache{$key .  '@mtime'} >= $mtime)
     {
@@ -648,8 +670,6 @@ sub readfile
 
         # return the contents of the file
         return $file_cache{$key};
-
-
     }
 
     #print STDERR "readfile $key\n";
@@ -768,9 +788,10 @@ sub push_incpath ($ )
     while (my $dir = shift)
     {
         $dir .= '/' if $dir !~ m|/$|;
-        if (substr($dir,0,1) ne '/')
+        if ($dir !~  m|^(?:[A-Za-z]:)?/|)
         {
             # turn into an absolute path if not already
+            # allow DOS drive letters at the start
             $dir = ($self->{'@cwd'} || cwd) . '/' . $dir;
         }
         push @ {$self->{'@incpath'}}, $dir;
@@ -867,15 +888,31 @@ __END__
 
 =head1 NAME
 
-HTML::Macro - generate dynamic HTML pages using templates
+HTML::Macro - process HTML templates with loops, conditionals, macros and more!
 
 =head1 SYNOPSIS
 
   use HTML::Macro;
-  $htm = HTML::Macro->new();
-  $htm->declare ('var', 'missing');
-  $htm->set ('var', 'value');
-  $htm->print ('test.html');
+  $htm = new HTML::Macro ('template.html');
+  $htm->print;
+
+  sub myfunc {
+    $htm->declare ('var', 'missing');
+    $htm->set ('var', 'value');
+    return $htm->process;
+  }
+
+  ( in template.html ):
+
+  <html><body>
+    <eval expr="&myfunc">
+      <if def="missing">
+        Message about missing stuff...
+      <else />
+        Var's value is #var#.
+      </if>
+    </eval>
+  </body></html>
 
 =head1 DESCRIPTION
 
@@ -1071,6 +1108,11 @@ The <loop> tag provides for repeated blocks of HTML, with
 subsequent iterations evaluated in different contexts.  For more about
 loops, see the IF:Page::Loop documentation.
 
+New in 1.21:
+
+Now allow normal XML-style for non-matched tags (like <else/> - we used to
+allow <else/ > and not <else />; now we allow both.
+
 New in 1.20; 
 
 File cache now respects modification times, reloading modified files.
@@ -1104,7 +1146,7 @@ which turns out to be expensive in many OS implementations since it calls
 directories, but at least it runs reasonably fast now when you have a lot
 of includes.
 
-    Eval blocks
+<eval/>: embedded perl evaluation
 
 New in 1.15, the <eval expr=""></eval> construct evaluates its expression
 attribute as Perl, in the package in which the HTML::Macro was created.
@@ -1138,10 +1180,10 @@ sub get_user_info
 Note that the syntax
 used to call the function makes use of a special Perl feature that the @_ variable is automatically passed as an arg list when you use & and not () in the function call: a more explicit syntax would be:
 
-<eval expr="&get_user_info(@_)">...
+  <eval expr="&get_user_info(@_)">...
 
 
-    Define
+<define />
 
 You can use the <define/> tag, as in:
 
