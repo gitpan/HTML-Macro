@@ -6,7 +6,7 @@
 package HTML::Macro;
 
 use strict;
-use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
+use vars qw($VERSION @ISA @EXPORT @EXPORT_OK %file_cache);
 
 require Exporter;
 require AutoLoader;
@@ -18,7 +18,7 @@ require AutoLoader;
 @EXPORT = qw(
 	
 );
-$VERSION = '1.18';
+$VERSION = '1.19';
 
 
 # Preloaded methods go here.
@@ -97,7 +97,7 @@ sub doloop ($$)
 {
     my ($self, $loop_id, $loop_body) = @_;
 
-    if ($self->{'@debug'}) {
+    if ($self->{'@attr'}->{'@debug'}) {
         print STDERR "HTML::Macro: processing loop $loop_id\n";
     }
     my $p = $self;
@@ -130,7 +130,7 @@ sub doloop ($$)
 sub doeval ($$)
 {
     my ($self, $expr, $body) = @_;
-    if ($self->{'@debug'}) {
+    if ($self->{'@attr'}->{'@debug'}) {
         print STDERR "HTML::Macro: processing eval: { $expr }\n";
     }
     my $nested = new HTML::Macro;
@@ -138,10 +138,9 @@ sub doeval ($$)
     $nested->{'@body'} = $body;
     my @incpath = @ {$self->{'@incpath'}};
     $nested->{'@incpath'} = \@incpath; # make a copy of incpath
-    $nested->{'@precompile'} = $self->{'@precompile'};
-    $nested->{'@debug'} = $self->{'@debug'};
-    $nested->{'@collapse_whitespace'} = $self->{'@collapse_whitespace'};
-    $nested->{'@collapse_blank_lines'} = $self->{'@collapse_blank_lines'};
+    $nested->{'@attr'} = $self->{'@attr'};
+    $nested->{'@cwd'} = $self->{'@cwd'};
+    $self->get_caller_info if ! $self->{'@caller_package'};
     my $package = $self->{'@caller_package'};
     my $result = eval " & {package $package; sub { $expr } } (\$nested)";
     if ($@) {
@@ -154,7 +153,7 @@ sub match_token ($$)
 {
     my ($self, $var) = @_;
 
-    if ($self->{'@debug'}) {
+    if ($self->{'@attr'}->{'@debug'}) {
         print STDERR "HTML::Macro: matching token $var\n";
     }
     # these are the two styles we've used
@@ -232,7 +231,7 @@ sub openfile
             open (FILE, $dir . $fname) || 
                 $self->error ("Cannot open $dir$fname: $!");
 
-            if ($self->{'@debug'}) {
+            if ($self->{'@attr'}->{'@debug'}) {
                 print STDERR "HTML::Macro: opening $dir/$fname, incpath=@incpath, cwd=", cwd, "\n";
             }
             $self->{'@file'} = $dir . $fname;
@@ -240,21 +239,29 @@ sub openfile
             # change directories so relative includes work
             # remember where we are so we can get back here
 
-            my $cwd = cwd;
+            my $cwd = $self->{'@cwd'} || cwd; # cwd is expensive
             push @ {$self->{'@cdpath'}}, $cwd;
 
             # add our current directory to incpath so includes from other directories
             # will still look here
-            push @ {$self->{'@incpath'}}, $dir =~ m|^/| ? $dir : "$cwd/$dir";
-            chdir ($dir) if $dir;
+            $dir = "$cwd/$dir" if $dir !~ m|^/|;
+            push @ {$self->{'@incpath'}}, $dir;
             my (@path) = split m|/|, $fname;
             if (@path > 1)
             {
-                my $dir = join '/', @path[0..$#path-1];
-                chdir $dir || $self->error 
-                    ("can't chdir $cwd/$dir to open $fname: $!");
+                # If the file path has a relative directory component, 
+                # append it to
+                # the our directory to get the file's abs path
+                
+                my $subdir = join '/', @path[0..$#path-1];
+                $dir = $subdir =~ m|^/| ? $subdir : "$dir/$subdir"; 
                 # $fname = $path[$#path];
             }
+            # chdir to where file is
+            $dir =~ s|//+|/|g;
+            chdir $dir || $self->error ("can't chdir $dir to open $fname: $!");
+            #print STDERR "openfile: \@cwd=", $dir, "\n";
+            $self->{'@cwd'} = $dir;
 
             return *FILE{IO};
         }
@@ -284,8 +291,14 @@ sub doinclude ($$)
 
         close $fh;
         my $lastdir = pop @ {$self->{'@cdpath'}};
-        chdir $lastdir if $lastdir;
-
+        if ($lastdir)
+        {
+            chdir $lastdir ;
+            $self->{'@cwd'} = $lastdir;
+        }
+        else {
+            delete $self->{'@cwd'};
+        }
         pop @ {$self->{'@incpath'}};
 
         return $result;
@@ -295,7 +308,23 @@ sub doinclude ($$)
     }
 }
 
+sub attr_backwards_compat
+{
+    my ($self) = @_;
+    my $attr = $self->{'@attr'};
+    foreach my $key ('@debug', '@collapse_whitespace', '@collapse_blank_lines',
+                     '@precompile')
+    {
+        $$attr{$key} = $$self{$key} if defined $$self{$key};
+    }
+}
+
 sub process_buf ($$)
+    # Note:
+    # We don't change to the caller's package here when we do evals of her
+    # expressions (in <if> and <quote>, eg.).  We probably
+    # should, but then code we've written that uses $self will
+    # break.
 {
     my ($self, $buf) = @_;
     return '' if ! $buf;
@@ -307,7 +336,9 @@ sub process_buf ($$)
     my $false = 0;
     my $emitting = 1;
     my $vanilla = 1;
-    my $underscore = $self->{'@precompile'} ? '_' : '';
+    &attr_backwards_compat;
+    my $underscore = $self->{'@attr'}->{'@precompile'} ? '_' : '';
+    print STDERR "Entering process_buf\n" if ($self->{'@attr'}->{'@debug'});
     while ($buf =~ m{(< \s*
                       (/?loop|/?if|include|/?else|/?quote|/?eval|define)$underscore(/?)
                       (   (?: \s+\w+ \s* = \s* "[^\"]*") |    # quoted attrs
@@ -569,16 +600,20 @@ sub process_buf ($$)
                       . '(' . $$tag[1] .')', $$tag[2]);
     }
     $out .= $self->dosub (substr ($buf, $pos));
-    if ($self->{'@collapse_whitespace'})
+    if (!$self->{'@parent'})
     {
-        # collapse adjacent white space
-        $out = &collapse_whitespace ($out, undef);
+        if ($self->{'@attr'}->{'@collapse_whitespace'})
+        {
+            # collapse adjacent white space
+            $out = &collapse_whitespace ($out, undef);
+        }
+        elsif ($self->{'@attr'}->{'@collapse_blank_lines'})
+        {
+            # remove blank lines
+            $out = &collapse_whitespace ($out, 1);
+        }
     }
-    elsif ($self->{'@collapse_blank_lines'})
-    {
-        # remove blank lines
-        $out = &collapse_whitespace ($out, 1);
-    }
+    print STDERR "Exiting process_buf\n" if ($self->{'@attr'}->{'@debug'});
     return $out;
 }
 
@@ -586,6 +621,23 @@ sub readfile
 {
     my ($self, $fname) = @_;
 
+    $self->{'@cwd'} = cwd if ! $self->{'@cwd'};
+    my $cwd = $self->{'@cwd'};
+    my $key = $cwd . '/' . $fname;
+
+    if ($self->{'@attr'}->{'@cache_files'} && exists $file_cache{$key})
+    {
+        #print STDERR "readfile CACHED (file=", $$self{'@file'}, ") $key\n";
+        $$self{'@body'} = $file_cache{$key};
+        $$self{'@file'} = $file_cache{$key . '@file'};
+        push @{$$self{'@incpath'}}, $file_cache{$key . '@incpath_new'};
+        push @{$$self{'@cdpath'}}, $file_cache{$key . '@cdpath_new'};
+        $$self{'@cwd'} = $file_cache{$key . '@cwd'};
+        chdir $$self{'@cwd'};
+        return;
+    }
+
+    #print STDERR "readfile $key\n";
     my $fh = $self->openfile ($fname);
 
     #open (HTML, $fname) || $self->error ("can't open $fname: $!");
@@ -594,6 +646,18 @@ sub readfile
     $$self{'@body'} = <$fh>;
     $/ = $separator;
     close $fh;
+
+    if ($self->{'@attr'}->{'@cache_files'})
+    {
+        $file_cache{$key} = $$self{'@body'};
+        $file_cache{$key . '@file'} = $$self{'@file'};
+        my $list = $$self{'@incpath'};
+        $file_cache{$key . '@incpath_new'} = $$list[$#$list];
+        $list = $$self{'@cdpath'};
+        $file_cache{$key . '@cdpath_new'} = $$list[$#$list];
+        $file_cache{$key . '@cwd'} = $$self{'@cwd'};
+    }
+    #print STDERR "cwd=", $$self{'@cwd'}, "\n";
 
     #warn "nothing read from $fname" if ! $$self{'@body'};
 }
@@ -606,7 +670,15 @@ sub process ($$)
     my $result =  $self->process_buf ($$self{'@body'});
     
     my $lastdir = pop @ {$self->{'@cdpath'}};
-    chdir $lastdir if $lastdir;
+    if ($lastdir)
+    {
+        #print STDERR "popping up to $lastdir\n";
+        chdir $lastdir ;
+        $self->{'@cwd'} = $lastdir;
+    }
+    else {
+        delete $self->{'@cwd'};
+    }
     pop @ {$self->{'@incpath'}};
 
     return $result;
@@ -626,7 +698,7 @@ sub print ($$)
 sub error
 {
     my ($self, $msg, $pos) = @_;
-    $self->get_caller_info;
+    $self->get_caller_info if ! $self->{'@caller_package'};
     $msg = "HTML::Macro: $msg";
     $msg .= " parsing " . $self->{'@file'} if ($self->{'@file'});
     $msg .= " near char $pos" if $pos;
@@ -636,7 +708,7 @@ sub error
 sub warning
 {
     my ($self, $msg, $pos) = @_;
-    $self->get_caller_info;
+    $self->get_caller_info if ! $self->{'@caller_package'};
     $msg = "HTML::Macro: $msg";
     $msg .= " parsing " . $self->{'@file'} if ($self->{'@file'});
     $msg .= " near char $pos" if $pos;
@@ -663,7 +735,7 @@ sub push_incpath ($ )
         if (substr($dir,0,1) ne '/')
         {
             # turn into an absolute path if not already
-            $dir = cwd . '/' . $dir;
+            $dir = ($self->{'@cwd'} || cwd) . '/' . $dir;
         }
         push @ {$self->{'@incpath'}}, $dir;
     }
@@ -697,13 +769,15 @@ sub declare ($@)
 sub get_caller_info ($ )
 {
     my ($self) = @_;
-    my $pkg;
     my ($caller_file, $caller_line);
     my $stack_count = 0;
+    my $pkg;
     do {
         ($pkg, $caller_file, $caller_line) = caller ($stack_count++);
     }
-    while ($pkg =~ /HTML::Macro/); # ignore HTML::Macro and HTML::Macro::Loop
+    # ignore HTML::Macro and HTML::Macro::Loop
+    while ($pkg =~ /HTML::Macro/);
+
     $self->{'@caller_package'} = $pkg;
     $self->{'@caller_file'} = $caller_file;
     $self->{'@caller_line'} = $caller_line;
@@ -714,8 +788,8 @@ sub new ($$ )
     my ($class, $fname) = @_;
     my $self = { };
     $self->{'@incpath'} = [];
+    $self->{'@attr'} = {};
     bless $self, $class;
-    $self->get_caller_info();   # need to know caller's package for eval to work
     &readfile($self, $fname) if ($fname);
     return $self;
 }
@@ -803,6 +877,7 @@ object is created, the file is read in to memory at that time.
 Optionally, declare the names of all the variables that will be substituted
 on this page.  This has the effect of defining the value '' for all these
 variables.
+
   $htm->declare ('var', 'missing');
 
 Set the values of one or more variables using HTML::Macro::set.
@@ -820,7 +895,6 @@ or save the value return by HTML::Macro::process.
     open CACHED_PAGE, '>page.html';
     print CACHED_PAGE, $htm->process;
     # or: print CACHED_PAGE, $htm->process ('templates/page_template.html');
-
     close CACHED_PAGE;
  
     - or - 
@@ -950,6 +1024,21 @@ The <loop> tag provides for repeated blocks of HTML, with
 subsequent iterations evaluated in different contexts.  For more about
 loops, see the IF:Page::Loop documentation.
 
+New in 1.19; Various performance enhancements, including file caching.
+Included files, and templates read by HTML::Macro::new and process are
+cached in memory if $self->{'@cache_files'} is true.  This can improve
+performance significantly if you include a file in a loop that is repeated
+often.  No attempt is made to detect when a file changes, so this cache is
+unsuitable for use with mod_perl.  I plan to add cache freshening at some
+point for just this reason.
+
+collapse_whitespace is now only called on the "final" pass of evaluation,
+saving considerable work.  Also, we attempt to make lighter use of cwd,
+which turns out to be expensive in many OS implementations since it calls
+`pwd`.  I am considering a rewrite of the entire mechanism for walking
+directories, but at least it runs reasonably fast now when you have a lot
+of includes.
+
     Eval blocks
 
 New in 1.15, the <eval expr=""></eval> construct evaluates its expression
@@ -1001,7 +1090,6 @@ expect.
 
 This feature is useful for passing arguments to functions called by eval.
 
-
 New in version 1.14:
 
 - The quote tag is now deprecated.  In its place, you should use tags with
@@ -1029,22 +1117,6 @@ New in version 1.14:
   former for a final pass in order to produce efficient HTML, the latter
   for the preprocessor, to improve the readability of generated HTML with a
   lot of blank lines in it.
-
-- Note that currently there is a bug with '@collapse_whitespace' and other
-  global settings stored in @-variables.  If you set them after creating 
-  loops then they are not inherited correctly by the loops.
-
-
-New in version 1.15:
-
-- eval tag
-- define tag
-- set takes multiple pairs of arguments
-- fixed bug with processing underscored tags (ie include_,loop_, etc..)
-  and whitespace removal
-- do substitutions on expressions to be evaluated
-- filename arg to HTML::Macro::new
-
 
 HTML::Macro is copyright (c) 2000,2001,2002 by Michael Sokolov and
 Interactive Factory (sm).  Some rights may be reserved.  This program is

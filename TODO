@@ -1,2 +1,5 @@
+* do we really need to chdir when we read a file?
+* pass options in a hash so we don't have to replicate them in loop rows, etc.
+* make file cache optional and check file mod times if mod_perl
 * <elsif>
 * short form <eval/>

@@ -18,7 +18,7 @@ require AutoLoader;
 @EXPORT = qw(
 	
 );
-$VERSION = '1.01';
+$VERSION = '1.02';
 
 
 # Preloaded methods go here.
@@ -29,12 +29,7 @@ sub new ($$$)
     my $self = {
         'vars' => [],
         'rows' => [],
-        '@debug' => $page->{'@debug'} || 0,
-        '@collapse_whitespace' => $page->{'@collapse_whitespace'},
-        '@collapse_blank_lines' => $page->{'@collapse_blank_lines'},
         '@parent' => $page,
-        '@incpath' => $page->{'@incpath'},
-        '@precompile' => $page->{'@precompile'} || 0,
         };
     bless $self, $class;
     return $self;
@@ -69,11 +64,8 @@ sub new_row
     my ($self) = @_;
     my $row = new HTML::Macro;
     $row->set ('@parent', $self);
-    $row->{'@debug'} = $self->{'@debug'};
-    $row->{'@collapse_whitespace'} = $self->{'@collapse_whitespace'};
-    $row->{'@collapse_blank_lines'} = $self->{'@collapse_blank_lines'};
-    $row->{'@incpath'} = $self->{'@incpath'};
-    $row->{'@precompile'} = $self->{'@precompile'};
+    $row->{'@attr'} = $self->{'@parent'}->{'@attr'};
+    $row->{'@incpath'} = $self->{'@parent'}->{'@incpath'};
     return $row;
 }
 
@@ -129,6 +121,7 @@ sub doloop ($$ )
     foreach my $row (@ {$$self{'rows'}})
     {
         my $iteration;
+        $row->{'@cwd'} = $self->{'@parent'}->{'@cwd'};
         $buf .= $row->process_buf ($body);
     }
     return $buf;

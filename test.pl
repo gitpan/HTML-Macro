@@ -26,7 +26,7 @@ if ($result eq '<if expr="0">ok</if>')
     print "ok 1a\n";
 } else
 {
-    print "not ok 1a: $result\n";
+    print "not ok 1a: $result\nshould be: <if expr=\"0\">ok</if>\n";
 }
 
 
