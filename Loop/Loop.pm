@@ -146,6 +146,7 @@ sub new_loop ()
     my ($self, $name, @loop_vars) = @_;
 
     my $rows = $$self{'rows'};
+    die "HTML::Loop::new_loop: no rows in loop - call a push method" if !@$rows;
     my $new_loop = new HTML::Macro::Loop ($$rows [$#$rows]);
 
     if ($name) {

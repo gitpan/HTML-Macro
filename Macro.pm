@@ -18,7 +18,7 @@ require AutoLoader;
 @EXPORT = qw(
 	
 );
-$VERSION = '1.21';
+$VERSION = '1.22';
 
 
 # Preloaded methods go here.
@@ -293,7 +293,7 @@ sub doinclude ($$)
     my ($self, $include) = @_;
     my $lastpos = 0;
     $include = $self->dosub ($include);
-    if ($include !~ m|<include_?/\s+file="(.*?)"\s*(asis)?\s*>|sgi)
+    if ($include !~ m|<include_?/?\s+file="(.*?)"\s*(asis)?\s*/?>|sgi)
     {
         $self->error ("bad include ($include)");
     }
@@ -780,6 +780,16 @@ sub set ($$)
         shift;
     }
     warn "odd number of arguments to set" if @_;
+}
+
+sub set_global ($$)
+{
+    my $self = shift;
+    my $parent;
+    while (my $parent = $self->{'@parent'}) {
+        $self = $parent;
+    }
+    $self->set (@_);
 }
 
 sub push_incpath ($ )
