@@ -18,7 +18,7 @@ require AutoLoader;
 @EXPORT = qw(
 	
 );
-$VERSION = '1.17';
+$VERSION = '1.18';
 
 
 # Preloaded methods go here.
@@ -703,7 +703,7 @@ sub get_caller_info ($ )
     do {
         ($pkg, $caller_file, $caller_line) = caller ($stack_count++);
     }
-    while ($pkg =~ /HTML::Macro/) # ignore HTML::Macro and HTML::Macro::Loop
+    while ($pkg =~ /HTML::Macro/); # ignore HTML::Macro and HTML::Macro::Loop
     $self->{'@caller_package'} = $pkg;
     $self->{'@caller_file'} = $caller_file;
     $self->{'@caller_line'} = $caller_line;
