@@ -1,5 +1,5 @@
 # HTML::Macro; Macro.pm
-# Copyright (c) 2001 Michael Sokolov and Interactive Factory. Some rights
+# Copyright (c) 2001 Michael Sokolov and Interactive Factory. All rights
 # reserved. This program is free software; you can redistribute it and/or
 # modify it under the same terms as Perl itself.
 
@@ -255,13 +255,13 @@ sub process_buf ($$)
     my $vanilla = 1;
     while ($buf =~ m{(< \s*
                       (/?loop|/?if|include/|/?else/?|/?quote)(_?)
-                      (   (?: \s+\w+ \s* = \s* "[^\"]*") |    # quoted attrs
+                      (?: (?: \s+\w+ \s* = \s* "[^\"]*") |    # quoted attrs
                           (?: \s+\w+ \s* =[^>\"]) | # attrs w/ no quotes
                           (?: \s+\w+) # attrs with no value
                        ) *          
                       >)}sgix)
     {
-        my ($match, $tag, $underscore, $attrs) = ($1, lc $2, $3, $4);
+        my ($match, $tag, $underscore) = ($1, lc $2, $3);
         next if ($self->{'@precompile'} && !$underscore);
         my $nextpos = (pos $buf) - (length ($match));
         $emitting = ! ($false || $looping);
@@ -417,25 +417,13 @@ sub process_buf ($$)
             push @tag_stack, ['if', $false, $nextpos] ;
             if ($vanilla) 
             {
-                if ($attrs =~ /^ *expr="([^\"]*)" *$/)
-                {
-                    my $expr = $1 || '';
-                    $expr = $self->dosub ($expr);
-                    $false = ! eval ( $expr );
-                    if ($@) {
-                        $self->error ("error evaluating $match (after substitutions: $expr): $@",
-                                      $nextpos);
-                    }
-                } 
-                elsif ($attrs =~ /^ *def="([^\"]*)" *$/)
-                {
-                    my $token = $1 || '';
-                    $false = ! $self->match_token ($token);
-                }
-                else
-                {
-                    $self->error ("error parsing 'if' attributes: $attrs)",
-                                  $nextpos);
+                $match =~ /expr="(.*)"/;
+                my $expr = $1 || '';
+                $expr = $self->dosub ($expr);
+                $false = ! eval ( $expr );
+                if ($@) {
+                    $self->error ("error evaluating $match (after substitutions: $expr): $@",
+                            $nextpos);
                 }
             }
             next;
@@ -635,16 +623,16 @@ provides a convenient mechanism for generating HTML pages by combining
 "dynamic" data derived from a database or other computation with HTML
 templates that represent fixed or "static" content of a page.
 
-There are many different ways to accomplish what HTML::Macro does,
-including ASP, embedded perl, CFML, etc, etc. The motivation behind
-HTML::Macro is to keep everything that a graphic designer wants to play
-with *in a single HTML template*, and to keep as much as possible of what a
-perl programmer wants to play with *in a perl file*.  Our thinking is that
-there are two basically dissimilar tasks involved in producing a dynamic
-web page: graphic design and programming. Even if one person is responsible
-for both tasks, it is useful to separate them in order to aid clear
-thinking and organized work.  I guess you could say the main motivation for
-this separation is to make it easier for emacs (and other text processors,
+There are many different ways to accomplish what HTML::Macro does, including
+ASP, embedded perl, CFML, etc, etc. The motivation behind HTML::Macro is to keep
+everything that a graphic designer wants to play with *in a single HTML
+template*, and to keep as much as possible of what a perl programmer wants
+to play with *in a perl file*.  Our thinking is that there are two
+basically dissimilar tasks involved in producing a dynamic web page:
+graphic design and programming. Even if one person is responsible for both
+tasks, it is useful to separate them in order to aid clear thinking and
+organized work.  I guess you could say the main motivation for this
+separation is to make it easier for emacs (and other text processors,
 including humans) to parse your files: it's yucky to have a lot of HTML in
 a string in your perl file, and it's yucky to have perl embedded in a
 special tag in an HTML file.
@@ -810,38 +798,9 @@ Finally, the <loop> tag provides for repeated blocks of HTML, with
 subsequent iterations evaluated in different contexts.  For more about
 loops, see the IF:Page::Loop documentation.
 
-New in version 1.14:
 
-- The quote tag is now deprecated.  In its place, you should use tags with
-  an underscore appended to indicate tags to be processed by a
-  preprocessor.  Indicate that this is a preprocessing pass by setting the
-  variable '@precompile' to something true.  For example: <if_ expr="0">I
-  am a comment to be removed by a preprocessor.</if_> <if expr="#num# >
-  10">this if will be left unevaluated by a preprocessor.</if>
-
-- Support for testing for the existence of a variable is now provided by
-  the if "def" attribute.  You used to have to do a test on the value of
-  the variable, which sometimes caused problems if the variable was a
-  complicated string with quotes in it.  Now you can say:
-
-  <if def="var"><b>#var#</b><br></if>
-
-  and so on.
-
-- If you set '@collapse_whitespace' the processor will collapse all
-  adjacent whitespace (including line terminators) to a single space.  An
-  exception is made for markup appearing within <textarea>, <pre> and
-  <quote> tags.  Similarly, setting '@collapse_blank_lines' (and not
-  '@collapse_whitespace', which takes precedence), will cause adjacent line
-  terminators to be collapsed to a single newline character.  We use the
-  former for a final pass in order to produce efficient HTML, the latter
-  for the preprocessor, to improve the readability of generated HTML with a
-  lot of blank lines in it.
-
-HTML::Macro is copyright (c) 2000,2001,2002 by Michael Sokolov and
-Interactive Factory (sm).  Some rights may be reserved.  This program is
-free software; you can redistribute it and/or modify it under the same
-terms as Perl itself.
+HTML::Macro is copyright (c) 2000 by Michael Sokolov and Interactive Factory
+(sm).  All rights are reserved.
 
 =head1 AUTHOR
 
@@ -852,10 +811,4 @@ Michael Sokolov, sokolov@ifactory.com
 perl(1).
 
 =cut
-
-
-
-
-
-
 

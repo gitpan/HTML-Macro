@@ -48,7 +48,7 @@ if ($result eq 'value &quot;&lt;quote me&gt;&quot; value2 value_x ##VAR_UP##')
 $ifp = HTML::Macro->new();
 $ifp->set ('val', 1);
 $result = $ifp->process ('test2.html');
-if ($result eq "greater\ngreaterequal\ngreaterequal\ngreater\ngreater\ngreaterequal\ngreaterequal\ngreater\n")
+if ($result eq "greater\ngreaterequal\ngreaterequal\ngreater\ngreater\ngreaterequal\ngreaterequal\ngreater\nok\n")
 {
     print "ok 3\n";
 } else
@@ -72,7 +72,7 @@ $ifp = HTML::Macro->new();
 $ifp->set ('pagenum', 2);
 $ifp->set ('val', 2);
 $result = $ifp->process ('test4.html');
-if ($result eq "2greater\ngreaterequal\ngreaterequal\ngreater\ngreater\ngreaterequal\ngreaterequal\ngreater\n\ngreater\ngreaterequal\ngreaterequal\ngreater\ngreater\ngreaterequal\ngreaterequal\ngreater\n")
+if ($result eq "2greater\ngreaterequal\ngreaterequal\ngreater\ngreater\ngreaterequal\ngreaterequal\ngreater\nok\n\ngreater\ngreaterequal\ngreaterequal\ngreater\ngreater\ngreaterequal\ngreaterequal\ngreater\nok\n")
 {
     print "ok 5\n";
 } else
@@ -101,5 +101,26 @@ if ($result eq 'included file stuff.htmlincluded file substuff.html')
 } else
 {
     print "not ok 7: $result\n";
+}
+
+$ifp->set ('@collapse_whitespace', 1);
+$result = $ifp->process ('test7.html');
+if ($result eq 'This has extra white space end ')
+{
+    print "ok 8\n";
+} else
+{
+    print "not ok 8: $result\n";
+}
+
+$ifp->set ('@collapse_whitespace', 0);
+$ifp->set ('@collapse_blank_lines', 1);
+$result = $ifp->process ('test7.html');
+if ($result eq "This       has        extra\n    white     space\nend\n")
+{
+    print "ok 9\n";
+} else
+{
+    print "not ok 9: $result\nshould be:\nThis has extra\n    white     space\nend\n";
 }
 

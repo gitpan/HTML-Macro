@@ -1,4 +1,4 @@
-# This Makefile is for the HTML::Macro::Loop extension to perl.
+# This Makefile is for the HTML::Macro extension to perl.
 #
 # It was generated automatically by MakeMaker version
 # 5.45 (Revision: 1.222) from the contents of
@@ -10,8 +10,8 @@
 #
 #   MakeMaker Parameters:
 
-#	NAME => q[HTML::Macro::Loop]
-#	VERSION_FROM => q[Loop.pm]
+#	NAME => q[HTML::Macro]
+#	VERSION_FROM => q[Macro.pm]
 
 # --- MakeMaker post_initialize section:
 
@@ -43,17 +43,17 @@ FULL_AR = /usr/bin/ar
 
 # --- MakeMaker constants section:
 AR_STATIC_ARGS = cr
-NAME = HTML::Macro::Loop
-DISTNAME = HTML-Macro-Loop
-NAME_SYM = HTML_Macro_Loop
-VERSION = 1.01
-VERSION_SYM = 1_01
-XS_VERSION = 1.01
-INST_BIN = ../blib/bin
-INST_EXE = ../blib/script
-INST_LIB = ../blib/lib
-INST_ARCHLIB = ../blib/arch
-INST_SCRIPT = ../blib/script
+NAME = HTML::Macro
+DISTNAME = HTML-Macro
+NAME_SYM = HTML_Macro
+VERSION = 1.13
+VERSION_SYM = 1_13
+XS_VERSION = 1.13
+INST_BIN = blib/bin
+INST_EXE = blib/script
+INST_LIB = blib/lib
+INST_ARCHLIB = blib/arch
+INST_SCRIPT = blib/script
 PREFIX = /usr
 INSTALLDIRS = site
 INSTALLPRIVLIB = $(PREFIX)/lib/perl5/5.6.0
@@ -89,11 +89,11 @@ MM_VERSION = 5.45
 # ROOTEXT = Directory part of FULLEXT with leading slash (eg /DBD)  !!! Deprecated from MM 5.32  !!!
 # PARENT_NAME = NAME without BASEEXT and no trailing :: (eg Foo::Bar)
 # DLBASE  = Basename part of dynamic library. May be just equal BASEEXT.
-FULLEXT = HTML/Macro/Loop
-BASEEXT = Loop
-PARENT_NAME = HTML::Macro
+FULLEXT = HTML/Macro
+BASEEXT = Macro
+PARENT_NAME = HTML
 DLBASE = $(BASEEXT)
-VERSION_FROM = Loop.pm
+VERSION_FROM = Macro.pm
 OBJECT = 
 LDFROM = $(OBJECT)
 LINKTYPE = dynamic
@@ -106,12 +106,12 @@ H_FILES =
 HTMLLIBPODS    = 
 HTMLSCRIPTPODS = 
 MAN1PODS = 
-MAN3PODS = Loop.pm
+MAN3PODS = Macro.pm
 HTMLEXT = html
-INST_MAN1DIR = ../blib/man1
+INST_MAN1DIR = blib/man1
 INSTALLMAN1DIR = $(PREFIX)/share/man/man1
 MAN1EXT = 1
-INST_MAN3DIR = ../blib/man3
+INST_MAN3DIR = blib/man3
 INSTALLMAN3DIR = $(PREFIX)/share/man/man3
 MAN3EXT = 3pm
 PERM_RW = 644
@@ -134,8 +134,8 @@ makemakerdflt: all
 CONFIGDEP = $(PERL_ARCHLIB)/Config.pm $(PERL_INC)/config.h
 
 # Where to put things:
-INST_LIBDIR      = $(INST_LIB)/HTML/Macro
-INST_ARCHLIBDIR  = $(INST_ARCHLIB)/HTML/Macro
+INST_LIBDIR      = $(INST_LIB)/HTML
+INST_ARCHLIBDIR  = $(INST_ARCHLIB)/HTML
 
 INST_AUTODIR     = $(INST_LIB)/auto/$(FULLEXT)
 INST_ARCHAUTODIR = $(INST_ARCHLIB)/auto/$(FULLEXT)
@@ -148,10 +148,10 @@ EXPORT_LIST =
 
 PERL_ARCHIVE = 
 
-TO_INST_PM = Loop.pm
+TO_INST_PM = Macro.pm
 
-PM_TO_BLIB = Loop.pm \
-	$(INST_LIBDIR)/Loop.pm
+PM_TO_BLIB = Macro.pm \
+	$(INST_LIBDIR)/Macro.pm
 
 
 # --- MakeMaker tool_autosplit section:
@@ -188,8 +188,49 @@ MKPATH = $(PERL) -I$(PERL_ARCHLIB) -I$(PERL_LIB) -MExtUtils::Command -e mkpath
 # need any changes to the core distribution and works with older perls
 EQUALIZE_TIMESTAMP = $(PERL) -I$(PERL_ARCHLIB) -I$(PERL_LIB) -MExtUtils::Command -e eqtime
 
+# Here we warn users that an old packlist file was found somewhere,
+# and that they should call some uninstall routine
+WARN_IF_OLD_PACKLIST = $(PERL) -we 'exit unless -f $$ARGV[0];' \
+-e 'print "WARNING: I have found an old package in\n";' \
+-e 'print "\t$$ARGV[0].\n";' \
+-e 'print "Please make sure the two installations are not conflicting\n";'
 
-# --- MakeMaker dist section skipped.
+UNINST=0
+VERBINST=1
+
+MOD_INSTALL = $(PERL) -I$(INST_LIB) -I$(PERL_LIB) -MExtUtils::Install \
+-e "install({@ARGV},'$(VERBINST)',0,'$(UNINST)');"
+
+DOC_INSTALL = $(PERL) -e '$$\="\n\n";' \
+-e 'print "=head2 ", scalar(localtime), ": C<", shift, ">", " L<", shift, ">";' \
+-e 'print "=over 4";' \
+-e 'while (defined($$key = shift) and defined($$val = shift)){print "=item *";print "C<$$key: $$val>";}' \
+-e 'print "=back";'
+
+UNINSTALL =   $(PERL) -MExtUtils::Install \
+-e 'uninstall($$ARGV[0],1,1); print "\nUninstall is deprecated. Please check the";' \
+-e 'print " packlist above carefully.\n  There may be errors. Remove the";' \
+-e 'print " appropriate files manually.\n  Sorry for the inconveniences.\n"'
+
+
+# --- MakeMaker dist section:
+
+DISTVNAME = $(DISTNAME)-$(VERSION)
+TAR  = tar
+TARFLAGS = cvf
+ZIP  = zip
+ZIPFLAGS = -r
+COMPRESS = gzip --best
+SUFFIX = .gz
+SHAR = shar
+PREOP = @$(NOOP)
+POSTOP = @$(NOOP)
+TO_UNIX = @$(NOOP)
+CI = ci -u
+RCS_LABEL = rcs -Nv$(VERSION_SYM): -q
+DIST_CP = best
+DIST_DEFAULT = tardist
+
 
 # --- MakeMaker macro section:
 
@@ -338,10 +379,10 @@ POD2MAN = $(PERL) -we '%m=@ARGV;for (keys %m){' \
 -e 'system(qq[$$^X ].q["-I$(PERL_ARCHLIB)" "-I$(PERL_LIB)" $(POD2MAN_EXE) ].qq[$$_>$$m{$$_}])==0 or warn "Couldn\047t install $$m{$$_}\n";' \
 -e 'chmod(oct($(PERM_RW))), $$m{$$_} or warn "chmod $(PERM_RW) $$m{$$_}: $$!\n";}'
 
-manifypods : pure_all Loop.pm
+manifypods : pure_all Macro.pm
 	@$(POD2MAN) \
-	Loop.pm \
-	$(INST_MAN3DIR)/HTML::Macro::Loop.$(MAN3EXT)
+	Macro.pm \
+	$(INST_MAN3DIR)/HTML::Macro.$(MAN3EXT)
 
 # --- MakeMaker processPL section:
 
@@ -351,7 +392,14 @@ manifypods : pure_all Loop.pm
 
 # --- MakeMaker subdirs section:
 
-# none
+# The default clean, realclean and test targets in this Makefile
+# have automatically been given entries for each subdir.
+
+
+subdirs ::
+	@cd Loop && $(MAKE) all $(PASTHRU)
+
+
 
 # --- MakeMaker clean section:
 
@@ -359,6 +407,7 @@ manifypods : pure_all Loop.pm
 # the Makefile here so a later make realclean still has a makefile to use.
 
 clean ::
+	-cd Loop && $(TEST_F) Makefile && $(MAKE) clean
 	-rm -rf ./blib $(MAKE_APERL_FILE) $(INST_ARCHAUTODIR)/extralibs.all perlmain.c mon.out core core.*perl.*.? *perl.core so_locations pm_to_blib *~ */*~ */*/*~ *$(OBJ_EXT) *$(LIB_EXT) perl.exe $(BOOTSTRAP) $(BASEEXT).bso $(BASEEXT).def $(BASEEXT).exp
 	-mv Makefile Makefile.old $(DEV_NULL)
 
@@ -367,22 +416,173 @@ clean ::
 
 # Delete temporary files (via clean) and also delete installed files
 realclean purge ::  clean
+	-cd Loop && $(TEST_F) Makefile.old && $(MAKE) -f Makefile.old realclean
+	-cd Loop && $(TEST_F) Makefile && $(MAKE)  realclean
 	rm -rf $(INST_AUTODIR) $(INST_ARCHAUTODIR)
-	rm -f $(INST_LIBDIR)/Loop.pm
+	rm -f $(INST_LIBDIR)/Macro.pm
 	rm -rf Makefile Makefile.old
 
 
-# --- MakeMaker dist_basics section skipped.
+# --- MakeMaker dist_basics section:
 
-# --- MakeMaker dist_core section skipped.
+distclean :: realclean distcheck
 
-# --- MakeMaker dist_dir section skipped.
+distcheck :
+	$(PERL) -I$(PERL_ARCHLIB) -I$(PERL_LIB) -MExtUtils::Manifest=fullcheck \
+		-e fullcheck
 
-# --- MakeMaker dist_test section skipped.
+skipcheck :
+	$(PERL) -I$(PERL_ARCHLIB) -I$(PERL_LIB) -MExtUtils::Manifest=skipcheck \
+		-e skipcheck
 
-# --- MakeMaker dist_ci section skipped.
+manifest :
+	$(PERL) -I$(PERL_ARCHLIB) -I$(PERL_LIB) -MExtUtils::Manifest=mkmanifest \
+		-e mkmanifest
 
-# --- MakeMaker install section skipped.
+
+# --- MakeMaker dist_core section:
+
+dist : $(DIST_DEFAULT)
+	@$(PERL) -le 'print "Warning: Makefile possibly out of date with $$vf" if ' \
+	    -e '-e ($$vf="$(VERSION_FROM)") and -M $$vf < -M "Makefile";'
+
+tardist : $(DISTVNAME).tar$(SUFFIX)
+
+zipdist : $(DISTVNAME).zip
+
+$(DISTVNAME).tar$(SUFFIX) : distdir
+	$(PREOP)
+	$(TO_UNIX)
+	$(TAR) $(TARFLAGS) $(DISTVNAME).tar $(DISTVNAME)
+	$(RM_RF) $(DISTVNAME)
+	$(COMPRESS) $(DISTVNAME).tar
+	$(POSTOP)
+
+$(DISTVNAME).zip : distdir
+	$(PREOP)
+	$(ZIP) $(ZIPFLAGS) $(DISTVNAME).zip $(DISTVNAME)
+	$(RM_RF) $(DISTVNAME)
+	$(POSTOP)
+
+uutardist : $(DISTVNAME).tar$(SUFFIX)
+	uuencode $(DISTVNAME).tar$(SUFFIX) \
+		$(DISTVNAME).tar$(SUFFIX) > \
+		$(DISTVNAME).tar$(SUFFIX)_uu
+
+shdist : distdir
+	$(PREOP)
+	$(SHAR) $(DISTVNAME) > $(DISTVNAME).shar
+	$(RM_RF) $(DISTVNAME)
+	$(POSTOP)
+
+
+# --- MakeMaker dist_dir section:
+
+distdir :
+	$(RM_RF) $(DISTVNAME)
+	$(PERL) -I$(PERL_ARCHLIB) -I$(PERL_LIB) -MExtUtils::Manifest=manicopy,maniread \
+		-e "manicopy(maniread(),'$(DISTVNAME)', '$(DIST_CP)');"
+
+
+# --- MakeMaker dist_test section:
+
+disttest : distdir
+	cd $(DISTVNAME) && $(PERL) -I$(PERL_ARCHLIB) -I$(PERL_LIB) Makefile.PL
+	cd $(DISTVNAME) && $(MAKE)
+	cd $(DISTVNAME) && $(MAKE) test
+
+
+# --- MakeMaker dist_ci section:
+
+ci :
+	$(PERL) -I$(PERL_ARCHLIB) -I$(PERL_LIB) -MExtUtils::Manifest=maniread \
+		-e "@all = keys %{ maniread() };" \
+		-e 'print("Executing $(CI) @all\n"); system("$(CI) @all");' \
+		-e 'print("Executing $(RCS_LABEL) ...\n"); system("$(RCS_LABEL) @all");'
+
+
+# --- MakeMaker install section:
+
+install :: all pure_install doc_install
+
+install_perl :: all pure_perl_install doc_perl_install
+
+install_site :: all pure_site_install doc_site_install
+
+install_ :: install_site
+	@echo INSTALLDIRS not defined, defaulting to INSTALLDIRS=site
+
+pure_install :: pure_$(INSTALLDIRS)_install
+
+doc_install :: doc_$(INSTALLDIRS)_install
+	@echo Appending installation info to $(INSTALLARCHLIB)/perllocal.pod
+
+pure__install : pure_site_install
+	@echo INSTALLDIRS not defined, defaulting to INSTALLDIRS=site
+
+doc__install : doc_site_install
+	@echo INSTALLDIRS not defined, defaulting to INSTALLDIRS=site
+
+pure_perl_install ::
+	@$(MOD_INSTALL) \
+		read $(PERL_ARCHLIB)/auto/$(FULLEXT)/.packlist \
+		write $(INSTALLARCHLIB)/auto/$(FULLEXT)/.packlist \
+		$(INST_LIB) $(INSTALLPRIVLIB) \
+		$(INST_ARCHLIB) $(INSTALLARCHLIB) \
+		$(INST_BIN) $(INSTALLBIN) \
+		$(INST_SCRIPT) $(INSTALLSCRIPT) \
+		$(INST_HTMLLIBDIR) $(INSTALLHTMLPRIVLIBDIR) \
+		$(INST_HTMLSCRIPTDIR) $(INSTALLHTMLSCRIPTDIR) \
+		$(INST_MAN1DIR) $(INSTALLMAN1DIR) \
+		$(INST_MAN3DIR) $(INSTALLMAN3DIR)
+	@$(WARN_IF_OLD_PACKLIST) \
+		$(SITEARCHEXP)/auto/$(FULLEXT)
+
+
+pure_site_install ::
+	@$(MOD_INSTALL) \
+		read $(SITEARCHEXP)/auto/$(FULLEXT)/.packlist \
+		write $(INSTALLSITEARCH)/auto/$(FULLEXT)/.packlist \
+		$(INST_LIB) $(INSTALLSITELIB) \
+		$(INST_ARCHLIB) $(INSTALLSITEARCH) \
+		$(INST_BIN) $(INSTALLBIN) \
+		$(INST_SCRIPT) $(INSTALLSCRIPT) \
+		$(INST_HTMLLIBDIR) $(INSTALLHTMLSITELIBDIR) \
+		$(INST_HTMLSCRIPTDIR) $(INSTALLHTMLSCRIPTDIR) \
+		$(INST_MAN1DIR) $(INSTALLMAN1DIR) \
+		$(INST_MAN3DIR) $(INSTALLMAN3DIR)
+	@$(WARN_IF_OLD_PACKLIST) \
+		$(PERL_ARCHLIB)/auto/$(FULLEXT)
+
+doc_perl_install ::
+	-@$(MKPATH) $(INSTALLARCHLIB)
+	-@$(DOC_INSTALL) \
+		"Module" "$(NAME)" \
+		"installed into" "$(INSTALLPRIVLIB)" \
+		LINKTYPE "$(LINKTYPE)" \
+		VERSION "$(VERSION)" \
+		EXE_FILES "$(EXE_FILES)" \
+		>> $(INSTALLARCHLIB)/perllocal.pod
+
+doc_site_install ::
+	-@$(MKPATH) $(INSTALLARCHLIB)
+	-@$(DOC_INSTALL) \
+		"Module" "$(NAME)" \
+		"installed into" "$(INSTALLSITELIB)" \
+		LINKTYPE "$(LINKTYPE)" \
+		VERSION "$(VERSION)" \
+		EXE_FILES "$(EXE_FILES)" \
+		>> $(INSTALLARCHLIB)/perllocal.pod
+
+
+uninstall :: uninstall_from_$(INSTALLDIRS)dirs
+
+uninstall_from_perldirs ::
+	@$(UNINSTALL) $(PERL_ARCHLIB)/auto/$(FULLEXT)/.packlist
+
+uninstall_from_sitedirs ::
+	@$(UNINSTALL) $(SITEARCHEXP)/auto/$(FULLEXT)/.packlist
+
 
 # --- MakeMaker force section:
 # Phony target to force checking subdirectories.
@@ -417,8 +617,18 @@ Makefile : Makefile.PL $(CONFIGDEP)
 # --- MakeMaker staticmake section:
 
 # --- MakeMaker makeaperl section ---
-MAP_TARGET    = ../perl
+MAP_TARGET    = perl
 FULLPERL      = /usr/bin/perl
+
+$(MAP_TARGET) :: static $(MAKE_APERL_FILE)
+	$(MAKE) -f $(MAKE_APERL_FILE) $@
+
+$(MAKE_APERL_FILE) : $(FIRST_MAKEFILE)
+	@echo Writing \"$(MAKE_APERL_FILE)\" for this $(MAP_TARGET)
+	@$(PERL) -I$(INST_ARCHLIB) -I$(INST_LIB) -I$(PERL_ARCHLIB) -I$(PERL_LIB) \
+		Makefile.PL DIR=Loop \
+		MAKEFILE=$(MAKE_APERL_FILE) LINKTYPE=static \
+		MAKEAPERL=1 NORECURS=1 CCCDLFLAGS=
 
 
 # --- MakeMaker test section:
@@ -432,6 +642,7 @@ TESTDB_SW = -d
 testdb :: testdb_$(LINKTYPE)
 
 test :: $(TEST_TYPE)
+	@cd Loop && $(TEST_F) Makefile && $(MAKE) test $(PASTHRU)
 
 test_dynamic :: pure_all
 	PERL_DL_NONLAZY=1 $(FULLPERL) -I$(INST_ARCHLIB) -I$(INST_LIB) -I$(PERL_ARCHLIB) -I$(PERL_LIB) $(TEST_FILE)
@@ -448,7 +659,7 @@ testdb_static :: testdb_dynamic
 # --- MakeMaker ppd section:
 # Creates a PPD (Perl Package Description) for a binary distribution.
 ppd:
-	@$(PERL) -e "print qq{<SOFTPKG NAME=\"HTML-Macro-Loop\" VERSION=\"1,01,0,0\">\n}. qq{\t<TITLE>HTML-Macro-Loop</TITLE>\n}. qq{\t<ABSTRACT></ABSTRACT>\n}. qq{\t<AUTHOR></AUTHOR>\n}. qq{\t<IMPLEMENTATION>\n}. qq{\t\t<OS NAME=\"$(OSNAME)\" />\n}. qq{\t\t<ARCHITECTURE NAME=\"i386-linux\" />\n}. qq{\t\t<CODEBASE HREF=\"\" />\n}. qq{\t</IMPLEMENTATION>\n}. qq{</SOFTPKG>\n}" > HTML-Macro-Loop.ppd
+	@$(PERL) -e "print qq{<SOFTPKG NAME=\"HTML-Macro\" VERSION=\"1,13,0,0\">\n}. qq{\t<TITLE>HTML-Macro</TITLE>\n}. qq{\t<ABSTRACT></ABSTRACT>\n}. qq{\t<AUTHOR></AUTHOR>\n}. qq{\t<IMPLEMENTATION>\n}. qq{\t\t<OS NAME=\"$(OSNAME)\" />\n}. qq{\t\t<ARCHITECTURE NAME=\"i386-linux\" />\n}. qq{\t\t<CODEBASE HREF=\"\" />\n}. qq{\t</IMPLEMENTATION>\n}. qq{</SOFTPKG>\n}" > HTML-Macro.ppd
 
 # --- MakeMaker pm_to_blib section:
 
