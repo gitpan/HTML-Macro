@@ -18,7 +18,7 @@ require AutoLoader;
 @EXPORT = qw(
 	
 );
-$VERSION = '1.02';
+$VERSION = '1.03';
 
 
 # Preloaded methods go here.
@@ -98,17 +98,31 @@ sub push_hash ($$)
     push @ {$$self{'rows'}}, $row;;
 }
 
-sub set ($$$ )
-# set a single value in the last row
+sub set ($@ )
+# set more values in the most recent row, or add a row if none exists
 {
-    my ($self, $key, $val) = @_;
+    my $self = shift;
     if (! $$self{'rows'} )
     {
-        $self->push_hash ({$key => $val});
+        $self->push_hash (\@_);
     } else {
         my $rows = $$self{'rows'};
         my $row = $$rows[$#$rows];
-        $row->set ($key, $val);
+        $row->set (@_);
+    }
+}
+
+sub set_hash ($$ )
+# set more values in the most recent row, or add a row if none exists
+{
+    my $self = shift;
+    if (! $$self{'rows'} )
+    {
+        $self->push_hash (@_);
+    } else {
+        my $rows = $$self{'rows'};
+        my $row = $$rows[$#$rows];
+        $row->set_hash (@_);
     }
 }
 

@@ -18,7 +18,7 @@ require AutoLoader;
 @EXPORT = qw(
 	
 );
-$VERSION = '1.19';
+$VERSION = '1.20';
 
 
 # Preloaded methods go here.
@@ -93,11 +93,17 @@ sub collapse_whitespace
     $out .= $buf;
 }
 
+sub process_cf_quotes
+{
+    my ($pbuf) = @_;
+    $$pbuf =~ s/<!---.*?--->//sg;
+}
+
 sub doloop ($$)
 {
     my ($self, $loop_id, $loop_body) = @_;
 
-    if ($self->{'@attr'}->{'@debug'}) {
+    if ($self->{'@attr'}->{'debug'}) {
         print STDERR "HTML::Macro: processing loop $loop_id\n";
     }
     my $p = $self;
@@ -130,7 +136,7 @@ sub doloop ($$)
 sub doeval ($$)
 {
     my ($self, $expr, $body) = @_;
-    if ($self->{'@attr'}->{'@debug'}) {
+    if ($self->{'@attr'}->{'debug'}) {
         print STDERR "HTML::Macro: processing eval: { $expr }\n";
     }
     my $nested = new HTML::Macro;
@@ -140,7 +146,7 @@ sub doeval ($$)
     $nested->{'@incpath'} = \@incpath; # make a copy of incpath
     $nested->{'@attr'} = $self->{'@attr'};
     $nested->{'@cwd'} = $self->{'@cwd'};
-    $self->get_caller_info if ! $self->{'@caller_package'};
+
     my $package = $self->{'@caller_package'};
     my $result = eval " & {package $package; sub { $expr } } (\$nested)";
     if ($@) {
@@ -153,7 +159,7 @@ sub match_token ($$)
 {
     my ($self, $var) = @_;
 
-    if ($self->{'@attr'}->{'@debug'}) {
+    if ($self->{'@attr'}->{'debug'}) {
         print STDERR "HTML::Macro: matching token $var\n";
     }
     # these are the two styles we've used
@@ -217,7 +223,7 @@ sub dosub ($$)
     return $html;
 }
 
-sub openfile
+sub findfile
 # follow the include path, looking for the file and return an open file handle
 {
     my ($self, $fname) = @_;
@@ -226,48 +232,55 @@ sub openfile
     while (@incpath)
     {
         my $dir = pop @incpath;
-        if (-f $dir . $fname)
-        {
-            open (FILE, $dir . $fname) || 
-                $self->error ("Cannot open $dir$fname: $!");
-
-            if ($self->{'@attr'}->{'@debug'}) {
-                print STDERR "HTML::Macro: opening $dir/$fname, incpath=@incpath, cwd=", cwd, "\n";
-            }
-            $self->{'@file'} = $dir . $fname;
-
-            # change directories so relative includes work
-            # remember where we are so we can get back here
-
-            my $cwd = $self->{'@cwd'} || cwd; # cwd is expensive
-            push @ {$self->{'@cdpath'}}, $cwd;
-
-            # add our current directory to incpath so includes from other directories
-            # will still look here
-            $dir = "$cwd/$dir" if $dir !~ m|^/|;
-            push @ {$self->{'@incpath'}}, $dir;
-            my (@path) = split m|/|, $fname;
-            if (@path > 1)
-            {
-                # If the file path has a relative directory component, 
-                # append it to
-                # the our directory to get the file's abs path
-                
-                my $subdir = join '/', @path[0..$#path-1];
-                $dir = $subdir =~ m|^/| ? $subdir : "$dir/$subdir"; 
-                # $fname = $path[$#path];
-            }
-            # chdir to where file is
-            $dir =~ s|//+|/|g;
-            chdir $dir || $self->error ("can't chdir $dir to open $fname: $!");
-            #print STDERR "openfile: \@cwd=", $dir, "\n";
-            $self->{'@cwd'} = $dir;
-
-            return *FILE{IO};
-        }
+        my @stat = stat $dir . $fname;
+        return ($dir . $fname, $stat[9]) if @stat;
     }
-    $self->error ("Cannot find $fname; cwd=" . cwd . ", incpath=". join ('; ', @ {$self->{'@incpath'}}));
-    return undef;               # unreachable
+    return ();
+}
+
+sub openfile
+# open the file, change directories to the file's directory, remembering where
+# we came from, and add the file's directory to incpath
+{
+    my ($self, $path) = @_;
+    my @incpath = @ {$self->{'@incpath'}};
+
+    open (FILE, $path) || 
+        $self->error ("Cannot open $path: $!");
+
+    if ($self->{'@attr'}->{'debug'}) {
+        print STDERR "HTML::Macro: opening $path, incpath=@incpath, cwd=", cwd, "\n";
+    }
+    $self->{'@file'} = $path;
+
+    # change directories so relative includes work
+    # remember where we are so we can get back here
+
+    my $cwd = $self->{'@cwd'} || cwd; # cwd is expensive
+    push @ {$self->{'@cdpath'}}, $cwd;
+
+    my ($dir, $fname);
+    if ($path =~ m|(.*)/([^/])+$|) {
+        ($dir, $fname) = ($1, $2);
+    } else {
+        ($dir, $fname) = ('', $path);
+    }
+
+    # add our current directory to incpath so includes from other directories
+    # will still look here
+
+    $dir = "$cwd/$dir" if $dir !~ m|^/|;
+    $dir =~ s|//+|/|g;          # remove double slashes
+
+    push @ {$self->{'@incpath'}}, $dir;
+
+    # chdir to where file is
+    chdir $dir || $self->error ("openfile can't chdir $dir (opening $path): $!");
+
+    #print STDERR "openfile: \@cwd=", $dir, "\n";
+    $self->{'@cwd'} = $dir;
+
+    return *FILE{IO};
 }
 
 sub doinclude ($$)
@@ -283,13 +296,9 @@ sub doinclude ($$)
     if ($asis)
     {
         #open (ASIS, $filename) || $self->error ("can't open $filename: $!");
-        my $fh = $self->openfile ($filename);
-        my $separator = $/;
-        undef $/;
-        my $result = <$fh>;
-        $/ = $separator;
+        
+        my $buf = $self->readfile ($filename);
 
-        close $fh;
         my $lastdir = pop @ {$self->{'@cdpath'}};
         if ($lastdir)
         {
@@ -301,7 +310,7 @@ sub doinclude ($$)
         }
         pop @ {$self->{'@incpath'}};
 
-        return $result;
+        return $buf;
     } else 
     {
         return $self->process ($filename);
@@ -312,19 +321,14 @@ sub attr_backwards_compat
 {
     my ($self) = @_;
     my $attr = $self->{'@attr'};
-    foreach my $key ('@debug', '@collapse_whitespace', '@collapse_blank_lines',
-                     '@precompile')
+    foreach my $key ('debug', 'collapse_whitespace', 'collapse_blank_lines',
+                     'precompile')
     {
-        $$attr{$key} = $$self{$key} if defined $$self{$key};
+        $$attr{$key} = $$self{'@' . $key} if defined $$self{'@' . $key};
     }
 }
 
 sub process_buf ($$)
-    # Note:
-    # We don't change to the caller's package here when we do evals of her
-    # expressions (in <if> and <quote>, eg.).  We probably
-    # should, but then code we've written that uses $self will
-    # break.
 {
     my ($self, $buf) = @_;
     return '' if ! $buf;
@@ -336,15 +340,21 @@ sub process_buf ($$)
     my $false = 0;
     my $emitting = 1;
     my $vanilla = 1;
+
     &attr_backwards_compat;
-    my $underscore = $self->{'@attr'}->{'@precompile'} ? '_' : '';
-    print STDERR "Entering process_buf\n" if ($self->{'@attr'}->{'@debug'});
+
+    my $underscore = $self->{'@attr'}->{'precompile'} ? '_' : '';
+    print STDERR "Entering process_buf\n" if ($self->{'@attr'}->{'debug'});
+
+    $self->get_caller_info if ! $self->{'@caller_package'};
+    my $package = $self->{'@caller_package'};
+
     while ($buf =~ m{(< \s*
                       (/?loop|/?if|include|/?else|/?quote|/?eval|define)$underscore(/?)
                       (   (?: \s+\w+ \s* = \s* "[^\"]*") |    # quoted attrs
                           (?: \s+\w+ \s* =[^>\"]) | # attrs w/ no quotes
                           (?: \s+\w+) # attrs with no value
-                       ) *          
+                       ) * \s*         
                       >)}sgix)
     {
         my ($match, $tag, $slash, $attrs) = ($1, lc $2, $3, $4);
@@ -457,7 +467,8 @@ sub process_buf ($$)
             {
                 my $expr = $1 || '';
                 $expr = $self->dosub ($expr);
-                if (eval ( $expr ))
+                my $result = eval "{ package $package; $expr }";
+                if ($result)
                 {
                     $quoting = 2;
                     # why ?
@@ -469,7 +480,8 @@ sub process_buf ($$)
                     {
                         $expr = $1 || '';
                         $expr = $self->dosub ($expr);
-                        if (eval ( $expr ))
+                        $result = eval "{ package $package; $expr }";
+                        if ($result)
                         {
                             $quoting = 1;
                         }
@@ -522,17 +534,17 @@ sub process_buf ($$)
             push @tag_stack, ['if', $false, $nextpos] ;
             if ($vanilla) 
             {
-                if ($attrs =~ /^ *expr="([^\"]*)" *$/)
-                {
+                if ($attrs =~ /^\s* expr \s* = \s* "([^\"]*)" \s*$/six)
+                { 
                     my $expr = $1 || '';
                     $expr = $self->dosub ($expr);
-                    $false = ! eval ( $expr );
+                    $false = !eval "{ package $package; $expr }";
                     if ($@) {
                         $self->error ("error evaluating $match (after substitutions: $expr): $@",
                                       $nextpos);
                     }
                 } 
-                elsif ($attrs =~ /^ *def="([^\"]*)" *$/)
+                elsif ($attrs =~ /^\s* def \s* = \s* "([^\"]*)" \s*$/six)
                 {
                     my $token = $1 || '';
                     $false = ! $self->match_token ($token);
@@ -600,20 +612,7 @@ sub process_buf ($$)
                       . '(' . $$tag[1] .')', $$tag[2]);
     }
     $out .= $self->dosub (substr ($buf, $pos));
-    if (!$self->{'@parent'})
-    {
-        if ($self->{'@attr'}->{'@collapse_whitespace'})
-        {
-            # collapse adjacent white space
-            $out = &collapse_whitespace ($out, undef);
-        }
-        elsif ($self->{'@attr'}->{'@collapse_blank_lines'})
-        {
-            # remove blank lines
-            $out = &collapse_whitespace ($out, 1);
-        }
-    }
-    print STDERR "Exiting process_buf\n" if ($self->{'@attr'}->{'@debug'});
+    print STDERR "Exiting process_buf\n" if ($self->{'@attr'}->{'debug'});
     return $out;
 }
 
@@ -625,38 +624,72 @@ sub readfile
     my $cwd = $self->{'@cwd'};
     my $key = $cwd . '/' . $fname;
 
-    if ($self->{'@attr'}->{'@cache_files'} && exists $file_cache{$key})
+    my ($path, $mtime) = $self->findfile ($fname);
+
+    if ($self->{'@attr'}->{'cache_files'} && exists $file_cache{$key}
+        && $file_cache{$key .  '@mtime'} >= $mtime)
     {
         #print STDERR "readfile CACHED (file=", $$self{'@file'}, ") $key\n";
-        $$self{'@body'} = $file_cache{$key};
+
+        # the name of the file
         $$self{'@file'} = $file_cache{$key . '@file'};
+
+        # the absolute path of the file's directory
         push @{$$self{'@incpath'}}, $file_cache{$key . '@incpath_new'};
+
+        # the absolute path of the enclosing file's directory;
+        # where we chdir when we're done processing this file
         push @{$$self{'@cdpath'}}, $file_cache{$key . '@cdpath_new'};
+
+        # Isn't this also the absolute path of the file's directory?
         $$self{'@cwd'} = $file_cache{$key . '@cwd'};
+
         chdir $$self{'@cwd'};
-        return;
+
+        # return the contents of the file
+        return $file_cache{$key};
+
+
     }
 
     #print STDERR "readfile $key\n";
-    my $fh = $self->openfile ($fname);
+    my $fh = $self->openfile ($path);
 
     #open (HTML, $fname) || $self->error ("can't open $fname: $!");
     my $separator = $/;
     undef $/;
-    $$self{'@body'} = <$fh>;
+    my $body = <$fh>;
     $/ = $separator;
     close $fh;
 
-    if ($self->{'@attr'}->{'@cache_files'})
+    # remove CFM-style quotes: <!--- ... --->
+    &process_cf_quotes (\$body);
+
+
+    # remove extra whitespace
+    if ($self->{'@attr'}->{'collapse_whitespace'})
     {
-        $file_cache{$key} = $$self{'@body'};
+        # collapse adjacent white space
+        $body = &collapse_whitespace ($body, undef);
+    }
+    elsif ($self->{'@attr'}->{'collapse_blank_lines'})
+    {
+        # remove blank lines
+        $body = &collapse_whitespace ($body, 1);
+    }
+
+    if ($self->{'@attr'}->{'cache_files'})
+    {
+        $file_cache{$key} = $body;
         $file_cache{$key . '@file'} = $$self{'@file'};
         my $list = $$self{'@incpath'};
         $file_cache{$key . '@incpath_new'} = $$list[$#$list];
         $list = $$self{'@cdpath'};
         $file_cache{$key . '@cdpath_new'} = $$list[$#$list];
         $file_cache{$key . '@cwd'} = $$self{'@cwd'};
+        $file_cache{$key .  '@mtime'} = $mtime;
     }
+    return $body;
     #print STDERR "cwd=", $$self{'@cwd'}, "\n";
 
     #warn "nothing read from $fname" if ! $$self{'@body'};
@@ -665,7 +698,10 @@ sub readfile
 sub process ($$)
 {
     my ($self, $fname) = @_;
-    &readfile if ($fname);
+
+    &attr_backwards_compat;
+
+    $$self{'@body'} = &readfile ($self, $fname) if ($fname);
 
     my $result =  $self->process_buf ($$self{'@body'});
     
@@ -783,14 +819,25 @@ sub get_caller_info ($ )
     $self->{'@caller_line'} = $caller_line;
 }
 
-sub new ($$ )
+sub new ($$$ )
 {
-    my ($class, $fname) = @_;
+    my ($class, $fname, $attr) = @_;
     my $self = { };
     $self->{'@incpath'} = [];
-    $self->{'@attr'} = {};
+
+    if ($attr) {
+        if (ref $attr ne 'HASH') {
+            $self->error ('third argument (attr) to new must be hash ref');
+        }
+        $self->{'@attr'} = $attr;
+    } else {
+        $self->{'@attr'} = {};
+    }
+
     bless $self, $class;
-    &readfile($self, $fname) if ($fname);
+
+    $$self{'@body'} = &readfile($self, $fname) if ($fname);
+
     return $self;
 }
 
@@ -1024,9 +1071,27 @@ The <loop> tag provides for repeated blocks of HTML, with
 subsequent iterations evaluated in different contexts.  For more about
 loops, see the IF:Page::Loop documentation.
 
+New in 1.20; 
+
+File cache now respects modification times, reloading modified files.
+
+Attribute handling was changed.  You should now specify attributes as a
+hash ref arg to new (like DBI).  Attributes to be specified (without a
+preceding '@') may be: collapse_whitespace, collapse_blank_lines, debug and
+precompile. 
+
+Collapse_whitespace is now called when loading (caching) files, for
+further optimization.  This means interpolated values are no longer
+collapsed; also any files read in by the user are not subject to
+collapsing.
+
+ColdFusion style quotes (<!--- ... --->) are now processed (by removing them).
+The processing is done when a file is read.
+
+
 New in 1.19; Various performance enhancements, including file caching.
 Included files, and templates read by HTML::Macro::new and process are
-cached in memory if $self->{'@cache_files'} is true.  This can improve
+cached in memory if the 'cache_files' attribute is true.  This can improve
 performance significantly if you include a file in a loop that is repeated
 often.  No attempt is made to detect when a file changes, so this cache is
 unsuitable for use with mod_perl.  I plan to add cache freshening at some

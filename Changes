@@ -31,3 +31,7 @@ Revision history for Perl extension HTML::Macro
         constructor takes optional filename argument and file argument to
         process and print is now optional.
         improved context description when reporting errors
+
+1.20 Sep 07 2002
+        Added file cache; detects updates and reloads when file touched
+        process white space and comments early (when reading files)
