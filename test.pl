@@ -138,12 +138,12 @@ sub set_val_to_world_no_nest
 }
 
 $result = $ifp->process ('test-eval.html');
-if ($result eq "Hello, World!\n" x 5)
+if ($result eq "Hello, World!\n" x 6)
 {
     print "ok 10\n";
 } else
 {
-    print "not ok 10:\n$result\nshould be:\n", ("Hello, World!\n" x 5);
+    print "not ok 10:\n$result\nshould be:\n", ("Hello, World!\n" x 6);
 }
 
 $ifp->set_global ('val', -1);

@@ -6,7 +6,7 @@
 package HTML::Macro;
 
 use strict;
-use vars qw($VERSION @ISA @EXPORT @EXPORT_OK %file_cache);
+use vars qw($VERSION @ISA @EXPORT @EXPORT_OK %file_cache %expr_cache);
 
 require Exporter;
 require AutoLoader;
@@ -18,7 +18,7 @@ require AutoLoader;
 @EXPORT = qw(
 	
 );
-$VERSION = '1.26';
+$VERSION = '1.27';
 
 
 # Preloaded methods go here.
@@ -243,13 +243,19 @@ sub findfile
 # follow the include path, looking for the file and return an open file handle
 {
     my ($self, $fname) = @_;
-    my @incpath = @ {$self->{'@incpath'}};
-    push (@incpath, $self->{'@cwd'} . '/', "") unless ($self->{'@no_local_incpath'});
-    while (@incpath)
-    {
-        my $dir = pop @incpath;
-        my @stat = stat $dir . $fname;
-        return ($dir . $fname, $stat[9]) if @stat;
+    if (substr($fname,0,1) eq '/') {
+        my @stat = stat $fname;
+        return ($fname, $stat[9]) if @stat;
+    } else {
+        my @incpath = @ {$self->{'@incpath'}};
+        push (@incpath, $self->{'@cwd'} . '/') unless ($self->{'@no_local_incpa\
+th'});
+        while (@incpath)
+        {
+            my $dir = pop @incpath;
+            my @stat = stat $dir . $fname;
+            return ($dir . $fname, $stat[9]) if @stat;
+        }
     }
     $self->error ("Cannot find file $fname, incpath=" . 
                   join (',',@ {$self->{'@incpath'}})
@@ -506,12 +512,13 @@ sub process_buf ($$)
             -- $looping;
             if ($true && !$looping && !$quoting)
             {
-                $attr = $self->dosub ($attr);
                 if ($tag eq '/loop') {
+                    $attr = $self->dosub ($attr);
                     $out .= $self->doloop 
                         ($attr, substr ($buf, $pos, $nextpos-$pos));
                 } else {
                     # tag=eval
+                    $attrval = $self->dosub ($attrval);
                     $out .= $self->doeval
                         ($attr, $attrval, substr ($buf, $pos, $nextpos-$pos));
                 }

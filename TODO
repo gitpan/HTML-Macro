@@ -1,4 +1,5 @@
-* <elsif>
+* bug - eval doesn't perform substitution on expression any more before 
+  evaluating?  See the bug in bugdb_dev headers...
 * <ifndef>
 * <eval function="" />
 this is a good idea; funcall via pointer is about 40 times faster than eval
