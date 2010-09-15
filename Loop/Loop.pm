@@ -18,7 +18,7 @@ require AutoLoader;
 @EXPORT = qw(
 	
 );
-$VERSION = '1.04';
+$VERSION = '1.06';
 
 
 # Preloaded methods go here.
@@ -126,20 +126,53 @@ sub set_hash ($$ )
     }
 }
 
-sub doloop ($$ )
+sub get ()
+# get values from the most recent row
+{
+    my ($self, $var) = @_;
+    my $rows = $$self{'rows'};
+    if ($rows) {
+        my $row = $$rows[$#$rows];
+        return $row->get($var);
+    }
+    return undef;
+}
+
+sub doloop ($$$$ )
 # perform repeated processing a-la HTML::Macro on the loop body $body,
 # concatenate the results and return that.
 {
-    my ($self, $body) = @_;
+    my ($self, $body, $separator, $separator_final, $collapse) = @_;
     my $buf = '';
+    my $markup_seen;
+    my @row_output;
     foreach my $row (@ {$$self{'rows'}})
     {
-        my $iteration;
         $row->{'@cwd'} = $self->{'@parent'}->{'@cwd'};
-        $buf .= $row->process_buf ($body);
+        $row->{'@dynamic'} = $self->{'@dynamic'};
+        my $row_markup = $row->process_buf ($body);
+        next if ($collapse && !$row_markup);
+        push @row_output, $row_markup;
+    }
+    my $n = scalar @row_output;
+    foreach my $row_markup (@row_output)
+    {
+        -- $n;
+        next if ($collapse && !$row_markup);
+        if ($markup_seen) {
+            # show a separator (we skip if collapse and the row generated no content)
+            if ($separator_final && $n == 0) {
+                $buf .= $separator_final;
+            } elsif ($separator) {
+                $buf .= $separator;
+            }
+        }
+        $buf .= $row_markup;
+        $markup_seen = 1;
     }
     return $buf;
 }
+
 
 sub new_loop ()
 {

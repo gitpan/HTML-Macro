@@ -18,7 +18,7 @@ require AutoLoader;
 @EXPORT = qw(
 	
 );
-$VERSION = '1.27';
+$VERSION = '1.29';
 
 
 # Preloaded methods go here.
@@ -97,11 +97,13 @@ sub process_cf_quotes
 {
     my ($pbuf) = @_;
     $$pbuf =~ s/<!---.*?--->//sg;
+    # These will be valid XML:
+    $$pbuf =~ s/<!--#.*?#-->//sg;
 }
 
 sub doloop ($$)
 {
-    my ($self, $loop_id, $loop_body) = @_;
+    my ($self, $loop_id, $loop_body, $element) = @_;
 
     if ($self->{'@attr'}->{'debug'}) {
         print STDERR "HTML::Macro: processing loop $loop_id\n";
@@ -128,7 +130,21 @@ sub doloop ($$)
     {
         $self->error ("doloop: $loop (substitution for loop id \"$loop_id\") is not a HTML::Macro::Loop!");
     }
-    $loop_body = $loop->doloop ($loop_body);
+    my $separator;
+    if ($element =~ /\bseparator="([^\"]*)"/ || 
+        $element =~ /\bseparator=(\S+)/) 
+    {
+        $separator = $1;
+    }
+    my $separator_final;
+    if ($element =~ /\bseparator_final="([^\"]*)"/ || 
+        $element =~ /\bseparator_final=(\S+)/) 
+    {
+        $separator_final = $1;
+    }
+    my $collapse = ($element =~ /\scollapse\b/);
+    $loop->{'@dynamic'} = $self;    # allow dynamic scoping of macros !
+    $loop_body = $loop->doloop ($loop_body, $separator, $separator_final, $collapse);
     #$loop_body = $self->dosub ($loop_body);
     return $loop_body;
 }
@@ -155,7 +171,7 @@ sub doeval ($$)
     my $result;
     if ($attr eq 'expr') {
         $result = eval " & {package $package; sub { $attrval } } (\$htm)";
-    } else {
+    } elsif ($attr eq 'func') {
         $package = $::{$package . '::'};
         my $func = $$package{$attrval};
         eval {
@@ -188,6 +204,7 @@ sub match_token ($$)
     }
     # these are the two styles we've used
     my $val;
+    my $dynamic = $self->{'@dynamic'};
     while ($self) 
     {
         # ovalues is also used to store request variables so they override
@@ -198,6 +215,11 @@ sub match_token ($$)
 
         # include outer loops in scope
         $self = $self->parent();
+    }
+    ## If no lexically-scoped variable matched, check dynamically scoped variables
+    # This has the effect of allowing unrelated (orthogonal) loops to be nested
+    if ($dynamic) {
+        return &match_token ($dynamic, $var);
     }
     return undef;
 }
@@ -212,8 +234,11 @@ sub dosub ($$)
     # by being greedy.  Probably should change it to be parsimonious and 
     # disallow hashmarks as part of tokens...
 
+    # NOTE: "word" may also be preceded by a single '@' now; this exposes
+    # internal values (like @include_body) for substitution
+
     my $lastpos = 0;
-    if ($html =~ /((\#{1,2})(\w+)\2)/sg )
+    if ($html =~ /((\#{1,2})(\@?\w+)\2)/sg )
     {
         my ( $matchpos, $matchlen ) = (pos ($html), length ($1));
         my $result = substr ($html, 0, $matchpos - $matchlen);
@@ -226,7 +251,7 @@ sub dosub ($$)
             $result .= defined ($val) ? 
                 ($quoteit ? &html_encode($val) : $val) : ($2 . $var . $2);
             $lastpos = $matchpos;
-            if ($html !~ /\G.*?((\#{1,2})(\w+)\2)/sg)
+            if ($html !~ /\G.*?((\#{1,2})(\@?\w+)\2)/sg)
             {
                 $result .= substr ($html, $lastpos);
                 return $result;
@@ -309,16 +334,32 @@ sub openfile
     return *FILE{IO};
 }
 
-sub doinclude ($$)
+sub dodefine
 {
-    my ($self, $include) = @_;
+    my ($self, $name, $val, $global) = @_;
+
+    # double-evaluation for define:
+    $val = $self->process_buf ($val);
+
+    if ($global) {
+        $self->set_global ($name, $self->dosub($val));
+    } else {
+        $self->set ($name, $self->dosub($val));
+    }
+}
+
+sub doinclude ($$$)
+{
+    my ($self, $include, $body) = @_;
     my $lastpos = 0;
+    my $file = $self->{'@file'};
     $include = $self->dosub ($include);
     if ($include !~ m|<include_?/?\s+file="(.*?)"\s*(asis)?\s*/?>|sgi)
     {
         $self->error ("bad include ($include)");
     }
     my ($filename, $asis) = ($1, $2);
+    my $out;
     if ($asis)
     {
         #open (ASIS, $filename) || $self->error ("can't open $filename: $!");
@@ -339,11 +380,21 @@ sub doinclude ($$)
         # process
         pop @ {$self->{'@incpath'}};
 
-        return $buf;
-    } else 
+        $out = $buf;
+    } 
+    elsif ($body)
     {
-        return $self->process ($filename);
+        my $inc_body = $self->{'@include_body'};
+        $self->{'@include_body'} = $body;
+        $out = $self->process ($filename);
+        $self->{'@include_body'} = $inc_body;
     }
+    else
+    {
+        $out = $self->process ($filename);
+    }
+    $self->{'@file'} = $file;
+    return $out;
 }
 
 sub attr_backwards_compat
@@ -401,24 +452,27 @@ sub process_buf ($$)
 
     &attr_backwards_compat;
 
+    # remove CFM-style quotes: <!--- ... --->
+    &process_cf_quotes (\$buf);
+
     my $underscore = $self->{'@attr'}->{'precompile'} ? '_' : '';
-    print STDERR "Entering process_buf\n" if ($self->{'@attr'}->{'debug'});
+    print STDERR "Entering process_buf: $buf\n" if ($self->{'@attr'}->{'debug'});
 
     $self->get_caller_info if ! $self->{'@caller_package'};
     my $package = $self->{'@caller_package'};
 
     while ($buf =~ m{(< \s*
-                      (/?loop|/?if|include|/?else|/?quote|/?eval|elsif|define)$underscore(/?)
+                      (/?loop|/?if|/?include|/?else|/?quote|/?eval|elsif|/?define)$underscore(/?)
                       (   (?: \s+\w+ \s* = \s* "[^\"]*") |    # quoted attrs
                           (?: \s+\w+ \s* =[^>\"]) | # attrs w/ no quotes
                           (?: \s+\w+) # attrs with no value
-                       ) * \s*         
+                       ) * \s*
                       (/?)>)}sgix)
     {
         my ($match, $tag, $slash, $attrs, $slash2) = ($1, lc $2, $3, $4, $5);
         my $nextpos = (pos $buf) - (length ($&));
         $slash = $slash2 if ! $slash; # allow normal XML style
-        if (! $slash && ($tag eq 'include' || $tag eq 'define' || $tag eq 'elsif'))
+        if (! $slash && $tag eq 'elsif')
         {
             $slash = 1;
             $self->warning ("missing trailing slash for singleton tag $tag", $nextpos);
@@ -479,7 +533,7 @@ sub process_buf ($$)
             # the matched tag
             $pos = $nextpos + length($match);
         }
-        if ($tag eq 'loop' || $tag eq 'eval')
+        if ($tag eq 'loop' || $tag eq 'eval' || $tag eq 'include' || $tag eq 'define')
             # loop and eval are similar in their lexical force - both are block-level
             # tags that force embedded scopes.  Therefore their contents are processed
             # in a nested evaluation, and not here.
@@ -490,16 +544,25 @@ sub process_buf ($$)
                 $match =~ /id="([^\"]*)"/ || $match =~ /id=(\S+)/ ||
                     $self->error ("loop tag '$match' has no id", $nextpos);
                 $attr = $1;
-            } else {
+		$attrval = $match;
+            } elsif ($tag eq 'eval') {
                 $match =~ /(expr|func)="([^\"]*)"/ || 
                     $self->error ("eval tag '$match' has no expr or func", $nextpos);
                 ($attr, $attrval) = ($1, $2);
+            } elsif ($tag eq 'include') {
+                $attr = $match;
+                $attrval = undef;
+            } elsif ($tag eq 'define') {
+                $match =~ /(name)="([^\"]*)"/ || 
+                    $self->error ("define tag '$match' has no name", $nextpos);
+                $attr = $match;
+                $attrval = $2;
             }
             push @tag_stack, [$tag, $attr, $nextpos, $attrval];
             ++$looping;
             next;
         }
-        if ($tag eq '/loop' || $tag eq '/eval')
+        if ($tag eq '/loop' || $tag eq '/eval' || $tag eq '/include' || $tag eq '/define')
         {
             my $matching_tag = pop @tag_stack;
             $self->error ("no match for tag '$tag'", $nextpos)
@@ -512,15 +575,23 @@ sub process_buf ($$)
             -- $looping;
             if ($true && !$looping && !$quoting)
             {
+                my $body = substr ($buf, $pos, $nextpos-$pos);
                 if ($tag eq '/loop') {
                     $attr = $self->dosub ($attr);
-                    $out .= $self->doloop 
-                        ($attr, substr ($buf, $pos, $nextpos-$pos));
-                } else {
+                    $out .= $self->doloop ($attr, $body, $attrval);
+                } elsif ($tag eq '/eval') {
                     # tag=eval
                     $attrval = $self->dosub ($attrval);
-                    $out .= $self->doeval
-                        ($attr, $attrval, substr ($buf, $pos, $nextpos-$pos));
+                    $out .= $self->doeval ($attr, $attrval, $body);
+                } elsif ($tag eq '/include') {
+                    my $incbody = #eval { 
+                        $self->process_buf ($body); 
+                    #};
+                    &error ("error processing included file $attr: $@") 
+                        if ($@);
+                    $out .= $self->doinclude ($attr, $incbody);
+                } elsif ($tag eq '/define') {
+                    $self->dodefine($attrval, $body);
                 }
                 $pos = $nextpos + length($match);
             }
@@ -654,28 +725,27 @@ sub process_buf ($$)
 
             push @tag_stack, ['else', $true] if $tag eq 'else';
         }
-        elsif ($tag eq 'include/')
+
+        # skip these tags if false since they don't effect the truth value:
+        next if !$active;
+
+        if ($tag eq 'include/')
         {
-            if ($active) {
-                my $file = $self->{'@file'};
-                $out .= $self->doinclude ($match);
-                $self->{'@file'} = $file;
-            }
+            # singleton (empty) include
+            $out .= $self->doinclude ($match);
         }
         elsif ($tag eq 'define/')
         {
-            if ($active)
-            {
-                $match =~ /name="([^\"]*)"/ || 
-                    $self->error ("no name attr for define tag in '$match'",
-                                  $nextpos);
-                my ($name) = $1;
-                $match =~ /value="([^\"]*)"/ || 
-                    $self->error ("no value attr for define tag in '$match'",
-                                  $nextpos);
-                my ($val) = $1;
-                $self->set ($name, $self->dosub($val));
-            }
+            $match =~ /name="([^\"]*)"/ || 
+                $self->error ("no name attr for define tag in '$match'",
+                              $nextpos);
+            my ($name) = $1;
+            $match =~ /value="([^\"]*)"/ || 
+                $self->error ("no value attr for empty define tag in '$match'",
+                              $nextpos);
+            my ($val) = $1;
+            my ($global) = ($match =~ / global(?:="global")?/);
+            $self->dodefine($name, $val, $global);
         }
         elsif ($tag eq 'eval/') {
             if ($match =~ /expr="([^\"]*)"/) {
@@ -696,7 +766,6 @@ sub process_buf ($$)
                       . '(' . $$tag[1] .')', $$tag[2]);
     }
     $out .= $self->dosub (substr ($buf, $pos));
-    print STDERR "Exiting process_buf\n" if ($self->{'@attr'}->{'debug'});
     # remove extra whitespace
 
     if ($self->{'@attr'}->{'collapse_whitespace'})
@@ -709,7 +778,7 @@ sub process_buf ($$)
         # remove blank lines
         $out = &collapse_whitespace ($out, 1);
     }
-
+    print STDERR "Exiting process_buf: $out\n" if ($self->{'@attr'}->{'debug'});
     return $out;
 }
 
@@ -759,10 +828,6 @@ sub readfile
     my $body = <$fh>;
     $/ = $separator;
     close $fh;
-
-    # remove CFM-style quotes: <!--- ... --->
-    &process_cf_quotes (\$body);
-
 
     # remove extra whitespace
     if ($self->{'@attr'}->{'collapse_whitespace'})
@@ -964,9 +1029,12 @@ sub get ($ )
 sub declare ($@)
 # use this to indicate which vars are expected on this page.
 # Just initializes the hash to have zero for all of its args
+# *if the variable is not already set*
 {
     my ($self, @vars) = @_;
-    @$self {@vars} = ('') x @vars;
+    for my $var (@vars) {
+        $self->{$var} = '' if ! defined ($self->{$var});
+    }
 }
 
 sub get_caller_info ($ )

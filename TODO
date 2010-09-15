@@ -1,11 +1,6 @@
-* bug - eval doesn't perform substitution on expression any more before 
-  evaluating?  See the bug in bugdb_dev headers...
 * <ifndef>
-* <eval function="" />
-this is a good idea; funcall via pointer is about 40 times faster than eval
-(plus inevitable memory savings).  However many (most?) evals are caused by
-"if expr".
-* short form <eval/>
+* try caching expressions (after substitution)
+they may often be constant
 * limit size of file cache - also test efficacy.
 ** test on RedHat 9 showed no effect
 Loading the same file repeatedly; the cache had no appreciable effect.

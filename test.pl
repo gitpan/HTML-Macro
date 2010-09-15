@@ -6,7 +6,7 @@
 # Change 1..1 below to 1..last_test_to_print .
 # (It may become useful if the test is moved to ./t subdirectory.)
 
-BEGIN { $| = 1; print "1..10\n"; }
+BEGIN { $| = 1; print "1..19\n"; }
 END {print "not ok 1\n" unless $loaded;}
 use HTML::Macro;
 $loaded = 1;
@@ -20,7 +20,7 @@ print "ok 1\n";
 
 $ifp = HTML::Macro->new();
 $ifp->set ('@precompile', 1);
-$result = $ifp->process ('test1.html');
+$result = $ifp->process ('test/test1.html');
 if ($result eq '<if expr="0">ok</if>')
 {
     print "ok 1a\n";
@@ -36,7 +36,7 @@ $ifp->set ('var', 'value');
 $ifp->set ('qvar', '"<quote me>"');
 $ifp->set ('var_var', 'value2');
 $ifp->set ('var_UP', 'value3');
-$result = $ifp->process ('test.html');
+$result = $ifp->process ('test/test.html');
 if ($result eq 'value &quot;&lt;quote me&gt;&quot; value2 value_x ##VAR_UP##')
 {
     print "ok 2\n";
@@ -47,7 +47,7 @@ if ($result eq 'value &quot;&lt;quote me&gt;&quot; value2 value_x ##VAR_UP##')
 
 $ifp = HTML::Macro->new();
 $ifp->set ('val', 1);
-$result = $ifp->process ('test2.html');
+$result = $ifp->process ('test/test2.html');
 if ($result eq "greater\ngreaterequal\ngreaterequal\ngreater\ngreater\ngreaterequal\ngreaterequal\ngreater\nok\n")
 {
     print "ok 3\n";
@@ -59,7 +59,7 @@ if ($result eq "greater\ngreaterequal\ngreaterequal\ngreater\ngreater\ngreatereq
 $ifp = HTML::Macro->new();
 $ifp->set ('val', 1);
 $ifp->set ('yes', 1);
-$result = $ifp->process ('test3.html');
+$result = $ifp->process ('test/test3.html');
 if ($result eq "greater\nlessequal\n")
 {
     print "ok 4\n";
@@ -71,7 +71,7 @@ if ($result eq "greater\nlessequal\n")
 $ifp = HTML::Macro->new();
 $ifp->set ('pagenum', 2);
 $ifp->set ('val', 2);
-$result = $ifp->process ('test4.html');
+$result = $ifp->process ('test/test4.html');
 if ($result eq "2greater\ngreaterequal\ngreaterequal\ngreater\ngreater\ngreaterequal\ngreaterequal\ngreater\nok\n\ngreater\ngreaterequal\ngreaterequal\ngreater\ngreater\ngreaterequal\ngreaterequal\ngreater\nok\n")
 {
     print "ok 5\n";
@@ -83,7 +83,7 @@ if ($result eq "2greater\ngreaterequal\ngreaterequal\ngreater\ngreater\ngreatere
 $ifp = HTML::Macro->new();
 $ifp->set ('pagenum', 2);
 $ifp->set ('val', 2);
-$result = $ifp->process ('test5.html');
+$result = $ifp->process ('test/test5.html');
 if ($result eq '<include/ file="/etc/passwd"><if expr="##YES##">greater</if><quote preserve="1">output should have the quote tag in it</quote>#VAL#')
 {
     print "ok 6\n";
@@ -93,8 +93,8 @@ if ($result eq '<include/ file="/etc/passwd"><if expr="##YES##">greater</if><quo
 }
 
 $ifp = HTML::Macro->new();
-$ifp->push_incpath ('include');
-$result = $ifp->process ('test6.html');
+$ifp->push_incpath ('test/include');
+$result = $ifp->process ('test/test6.html');
 if ($result eq 'included file stuff.htmlincluded file substuff.html 6a')
 {
     print "ok 7\n";
@@ -104,7 +104,7 @@ if ($result eq 'included file stuff.htmlincluded file substuff.html 6a')
 }
 
 $ifp->set ('@collapse_whitespace', 1);
-$result = $ifp->process ('test7.html');
+$result = $ifp->process ('test/test7.html');
 if ($result eq "This has extra white space <textarea name=\"test\">\nbut\npreserve\nthis\n</textarea> end ")
 {
     print "ok 8\n";
@@ -115,7 +115,7 @@ if ($result eq "This has extra white space <textarea name=\"test\">\nbut\npreser
 
 $ifp->set ('@collapse_whitespace', 0);
 $ifp->set ('@collapse_blank_lines', 1);
-$result = $ifp->process ('test7.html');
+$result = $ifp->process ('test/test7.html');
 if ($result eq "This       has        extra\n    white     space\n<textarea name=\"test\">\nbut\npreserve\nthis\n</textarea>\nend\n")
 {
     print "ok 9\n";
@@ -137,8 +137,8 @@ sub set_val_to_world_no_nest
     $htm->set ('val', 'World');
 }
 
-$result = $ifp->process ('test-eval.html');
-if ($result eq "Hello, World!\n" x 6)
+$result = $ifp->process ('test/test-eval.html');
+if ($result eq "Hello, World!\n" x 7)
 {
     print "ok 10\n";
 } else
@@ -148,7 +148,7 @@ if ($result eq "Hello, World!\n" x 6)
 
 $ifp->set_global ('val', -1);
 $ifp->set ('yes', 1);
-$result = $ifp->process ('test-global.html');
+$result = $ifp->process ('test/test-global.html');
 if ($result eq "greater\nlessequal\n")
 {
     print "ok 11\n";
@@ -160,7 +160,7 @@ if ($result eq "greater\nlessequal\n")
 
 $ifp->set_ovalue ('val', -1);
 $ifp->set_ovalue ('oval', 1);
-$result = $ifp->process ('test-global.html');
+$result = $ifp->process ('test/test-global.html');
 if ($result eq "lessequal\ngreater\n")
 {
     print "ok 12\n";
@@ -178,7 +178,7 @@ if (grep /oval/, $ifp->keys()) {
 }
 
 eval {
-    $ifp->process ('test-error.txt');
+    $ifp->process ('test/test-error.txt');
 };
 
 if ($@ =~ qr{^HTML::Macro: error parsing 'if' attributes:  blah
@@ -198,9 +198,95 @@ parsing .*/test-error.txt on line 3, char 0
 called from test.pl, line };
 }
 
-$result = $ifp->process ('test-elsif.html');
+$ifp = new HTML::Macro;
+$result = $ifp->process ('test/test-elsif.html');
 if ($result ne "one\ntwo\nthree\nfour\n") {
     print "not ok 15: test-elsif produced $result\n";
 } else {
     print "ok 15\n";
 }
+
+$ifp = new HTML::Macro;
+$ifp->set ('yes', 1);
+$result = $ifp->process ('test/test-def-global.html');
+if ($result eq "greater\nlessequal\n")
+{
+    print "ok 16\n";
+} else
+{
+    print "not ok 16: $result\n";
+    print "val=", $ifp->get ('val'), "\n";
+}
+
+$ifp = new HTML::Macro;
+$result = $ifp->process ('test/test-include-body.html');
+if ($result eq "included: BODY")
+{
+    print "ok 17\n";
+} else
+{
+    print "not ok 17: $result\n";
+}
+
+$result = $ifp->process ('test/test-include-body2.html');
+if ($result eq "<outer><inner>BODY</inner></outer>")
+{
+    print "ok 18\n";
+} else
+{
+    print "not ok 18: $result\n";
+}
+
+$result = $ifp->process ('test/test-include-body3.html');
+if ($result eq "<outer><inner>BODY</inner></outer>")
+{
+    print "ok 19\n";
+} else
+{
+    print "not ok 19: $result\n";
+}
+
+$result = $ifp->process_buf ('<!--#hidden#-->ok<!---not here--->');
+if ($result eq "ok")
+{
+    print "ok 20\n";
+} else
+{
+    print "not ok 20: $result\n";
+}
+
+$result = $ifp->process_buf ('<define name="ok">ok</define>#ok#');
+if ($result eq "ok")
+{
+    print "ok 21\n";
+} else
+{
+    print "not ok 21: $result\n";
+}
+
+$result = $ifp->process_buf (q{
+<define name="ok1">ok</define>
+<define name="ok2">#ok1#</define>
+#ok1# #ok2#
+});
+if ($result =~ /ok ok/)
+{
+    print "ok 22\n";
+} else
+{
+    print "not ok 22: $result\n";
+}
+
+$result = $ifp->process_buf (q{
+<define name="ok1"><eval expr="'ok'"></eval></define>
+<define name="ok2">#ok1#</define>
+#ok1# #ok2#
+});
+if ($result =~ /ok ok/)
+{
+    print "ok 23\n";
+} else
+{
+    print "not ok 23: $result\n";
+}
+
